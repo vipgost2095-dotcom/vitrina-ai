@@ -1,1 +1,7 @@
-
+{
+  "url": "https://your-frontend-domain.example",
+  "name": "ВитринаAI",
+  "iconUrl": "https://your-frontend-domain.example/icon.png",
+  "termsOfUseUrl": "https://your-frontend-domain.example/terms",
+  "privacyPolicyUrl": "https://your-frontend-domain.example/privacy"
+}
