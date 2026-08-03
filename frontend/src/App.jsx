@@ -18,6 +18,7 @@ export default function App() {
   const [orderId, setOrderId] = useState(null);
   const [previewUrls, setPreviewUrls] = useState([]);
   const [styles, setStyles] = useState([]);
+  const [labels, setLabels] = useState([]);
 
   useEffect(() => {
     initTelegram();
@@ -27,7 +28,7 @@ export default function App() {
     <div className="min-h-screen flex flex-col">
       <header className="px-4 py-4 text-center">
         <h1 className="text-xl font-bold">🖼️ ВитринаAI</h1>
-        <p className="text-xs text-tg-hint">Красивые карточки для маркетплейсов за пару минут</p>
+        <p className="text-xs text-tg-hint">Карточки под Wildberries, Ozon и другие площадки за пару минут</p>
       </header>
 
       <main className="flex-1">
@@ -35,10 +36,11 @@ export default function App() {
           <>
             <WalletConnect />
             <UploadForm
-              onUploaded={(id, urls, uploadedStyles) => {
+              onUploaded={(id, urls, uploadedStyles, uploadedLabels) => {
                 setOrderId(id);
                 setPreviewUrls(urls);
                 setStyles(uploadedStyles);
+                setLabels(uploadedLabels);
                 setStep(STEPS.PREVIEW);
               }}
             />
@@ -48,12 +50,12 @@ export default function App() {
         {step === STEPS.PREVIEW && (
           <CardPreview
             previewUrls={previewUrls}
-            styles={styles}
+            labels={labels}
             onPay={() => setStep(STEPS.PAYMENT)}
           />
         )}
 
-        {step === STEPS.PAYMENT && <PaymentScreen orderId={orderId} styles={styles} />}
+        {step === STEPS.PAYMENT && <PaymentScreen orderId={orderId} labels={labels} />}
       </main>
     </div>
   );
