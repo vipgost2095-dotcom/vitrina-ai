@@ -1,8 +1,22 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { nodePolyfills } from 'vite-plugin-node-polyfills';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    // TonConnect/@ton/core используют Node-глобалы (Buffer, process) которых
+    // нет в браузере — без этого плагина приложение падает с "Buffer is not
+    // defined" сразу при загрузке скрипта, ещё до рендера React (поэтому
+    // экран остаётся полностью пустым, даже ErrorBoundary не успевает сработать).
+    nodePolyfills({
+      globals: {
+        Buffer: true,
+        global: true,
+        process: true,
+      },
+    }),
+    react(),
+  ],
   server: {
     host: true, // чтобы Telegram-девтулзы могли открыть dev-сервер по локальной сети
     port: 5173,
