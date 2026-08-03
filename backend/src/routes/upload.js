@@ -1,6 +1,7 @@
 // routes/upload.js — приём фото и (необязательного) текстового описания
 // желаемого фона/стиля от пользователя, генерация карточек в 3 форматах
-// (квадрат/портрет/сторис) + превью с водяным знаком для каждого.
+// (квадрат/портрет/сторис) + превью с водяным знаком для каждого, плюс
+// (опционально) ИИ-текст карточки: название/описание/буллеты по фото.
 
 import { Router } from 'express';
 import multer from 'multer';
@@ -9,6 +10,7 @@ import fs from 'node:fs';
 import { v4 as uuidv4 } from 'uuid';
 import { createOrder, updateOrder, upsertUser } from '../db.js';
 import { generateCardVariants, applyWatermarkToVariants } from '../photoProcessing.js';
+import { tryGenerateProductCopy } from '../aiCopywriting.js';
 
 const router = Router();
 
@@ -55,10 +57,15 @@ router.post('/upload', upload.single('photo'), async (req, res) => {
     // И версии с водяным знаком — именно их видит пользователь на превью
     const watermarkedVariants = await applyWatermarkToVariants(finalVariants, orderId);
 
+    // Параллельно (не блокируя друг друга) пробуем сгенерировать текст карточки —
+    // необязательный бонус, если не настроен/не удался — просто не покажем блок с текстом
+    const productCopy = await tryGenerateProductCopy({ imagePath: req.file.path, userDescription: description });
+
     updateOrder(orderId, {
       status: 'generated',
       final_paths_json: JSON.stringify(finalVariants),
       watermarked_paths_json: JSON.stringify(watermarkedVariants),
+      product_copy_json: productCopy ? JSON.stringify(productCopy) : null,
     });
 
     res.json({
@@ -66,6 +73,7 @@ router.post('/upload', upload.single('photo'), async (req, res) => {
       previewUrls: watermarkedVariants.map((v, index) => `/api/preview/${orderId}/${index}`),
       styles: watermarkedVariants.map((v) => v.style),
       labels: watermarkedVariants.map((v) => v.label),
+      productCopy, // { title, description, bullets } или null
     });
   } catch (err) {
     console.error('Ошибка при обработке фото:', err);
