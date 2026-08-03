@@ -56,6 +56,9 @@ const migrations = [
   // delivered = 1, если бот уже отправил все 4 карточки пользователю в чат
   // (нужно, чтобы не отправлять их повторно при каждом опросе статуса оплаты)
   ['delivered', "ALTER TABLE orders ADD COLUMN delivered INTEGER DEFAULT 0"],
+  // product_copy_json хранит {title, description, bullets} — текст карточки
+  // (название, продающее описание, буллеты характеристик), сгенерированный ИИ
+  ['product_copy_json', "ALTER TABLE orders ADD COLUMN product_copy_json TEXT"],
 ];
 for (const [column, sql] of migrations) {
   if (!existingColumns.has(column)) db.exec(sql);
