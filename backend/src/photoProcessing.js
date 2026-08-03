@@ -1,23 +1,22 @@
 // photoProcessing.js
-// Генерирует карточки товара из одного исходного фото, с фоном по описанию,
-// которое вводит сам пользователь (например "премиум чёрный фон с золотыми
-// акцентами" или "пастельный минимализм"). Два независимых этапа:
+// Генерирует 3 карточки товара из одного исходного фото, каждую — со своим,
+// РЕАЛЬНО РАЗНЫМ фоном/настроением (а не одну и ту же картинку, обрезанную
+// по-разному). Размер карточки задаёт сам пользователь (ширина/высота).
 //
 // 1) Вырезание товара с фона — реальный внешний сервис (remove.bg / Picsart),
 //    настраивается через .env: PHOTO_API_PROVIDER=removebg|picsart.
-//    Возвращает PNG с прозрачным фоном (альфа-канал).
 //
-// 2) Генерация нового фона под товар — реальный ИИ через OpenAI Images API
-//    (модель gpt-image-1, режим /v1/images/edits): на вход идёт PNG с
-//    прозрачным фоном из шага 1, ИИ "дорисовывает" прозрачную область по
-//    текстовому промпту (описание пользователя + базовый промпт), товар
-//    при этом не трогает (OpenAI использует альфа-канал входного
-//    изображения как маску, если явную маску не передавать).
-//    Настраивается через .env: AI_BACKGROUND_PROVIDER=openai|openai_full + OPENAI_API_KEY.
+// 2) Генерация фона под товар — реальный ИИ через OpenAI Images API
+//    (модель gpt-image-1, режим /v1/images/edits). Вызывается 3 РАЗА — по
+//    разу на каждый из 3 стилевых направлений (STYLE_VARIATIONS), поэтому
+//    расход на ИИ теперь примерно в 3 раза выше, чем при одной генерации.
+//    Если пользователь что-то написал в описании — это описание используется
+//    как есть во всех трёх запросах, а стилевое направление лишь добавляет
+//    вариативность настроения/освещения/цвета, не отменяя того, что попросил
+//    пользователь.
 //
-// Без ключей оба шага работают как раньше — простая заглушка на sharp
-// (исходное фото как есть + плоский градиентный фон), чтобы проект был
-// рабочим "из коробки" без единого внешнего API.
+// Без ключей всё работает как раньше — простая заглушка на sharp (исходное
+// фото как есть + 3 разных градиентных фона), без единого внешнего API.
 
 import sharp from 'sharp';
 import fetch from 'node-fetch';
@@ -27,26 +26,54 @@ import fs from 'node:fs';
 const GENERATED_DIR = process.env.GENERATED_DIR || './generated';
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
 
-// Форматы карточки: одинаковый сгенерированный фон, но 3 распространённых
-// соотношения сторон — квадрат, портрет, вертикальная "сторис". Никакой
-// привязки к конкретным площадкам — пользователь описывает стиль сам,
-// а формат просто даёт выбор под разные места публикации.
-const CARD_VARIANTS = [
-  { name: 'square', label: 'Квадрат', width: 1000, height: 1000, gradientFrom: '#f5f3ff', gradientTo: '#e0e7ff' },
-  { name: 'portrait', label: 'Портрет', width: 1080, height: 1350, gradientFrom: '#fdf2f8', gradientTo: '#fce7f3' },
-  { name: 'story', label: 'Сторис', width: 1080, height: 1920, gradientFrom: '#ecfdf5', gradientTo: '#d1fae5' },
+const MIN_SIZE = 200;
+const MAX_SIZE = 2048;
+const DEFAULT_SIZE = 1000;
+
+/** Приводит присланный пользователем размер к разумным границам. */
+export function normalizeSize(value) {
+  const n = Number.parseInt(value, 10);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_SIZE;
+  return Math.min(MAX_SIZE, Math.max(MIN_SIZE, n));
+}
+
+// 3 стилевых направления — реально разные фоны/настроение, а не просто
+// разный формат кадра. gradientFrom/gradientTo используются только в
+// запасном режиме без ИИ (для визуального разнообразия и там тоже).
+const STYLE_VARIATIONS = [
+  {
+    name: 'variant1',
+    styleHint: 'clean modern minimalist studio background, soft neutral tones, even lighting',
+    gradientFrom: '#f5f3ff',
+    gradientTo: '#e0e7ff',
+  },
+  {
+    name: 'variant2',
+    styleHint: 'warm golden-hour lighting, cozy lifestyle mood, soft amber and cream tones',
+    gradientFrom: '#fff7ed',
+    gradientTo: '#fed7aa',
+  },
+  {
+    name: 'variant3',
+    styleHint: 'bold vibrant colors, dynamic modern graphic background, high contrast',
+    gradientFrom: '#ecfeff',
+    gradientTo: '#a5f3fc',
+  },
 ];
 
-// Используется ТОЛЬКО если пользователь ничего не написал в поле описания —
-// нейтральный фон по умолчанию.
+// Используется, только если пользователь ничего не написал в описании И для
+// этого стилевого направления нет своего styleHint (на практике не бывает —
+// styleHint есть всегда, это просто аварийный запасной вариант).
 const DEFAULT_BACKGROUND_PROMPT =
-  'Professional e-commerce product photography background: clean, elegant, ' +
-  'softly lit studio backdrop with a subtle realistic shadow beneath the product, ' +
-  'premium look';
+  'Professional e-commerce product photography background, clean, elegant, premium look';
 
-// Технические требования к качеству — не про СТИЛЬ фона, поэтому не
-// противоречат описанию пользователя и добавляются всегда.
-const QUALITY_SUFFIX = 'Photorealistic, no added text, no watermarks, no logos.';
+// Технические требования — не про стиль фона, поэтому не спорят с описанием
+// пользователя, добавляются всегда. Отдельно просим прямой ровный ракурс без
+// наклона, чтобы товар не выглядел "перекошенным" на карточке.
+const QUALITY_SUFFIX =
+  'Photorealistic, no added text, no watermarks, no logos. ' +
+  'Photograph the product straight-on and level, centered in the frame, ' +
+  'not tilted or rotated, no dramatic diagonal angles.';
 
 // Только для режима openai_full (без точной альфа-маски) — жёсткое условие
 // "не трогай товар" обязательно всегда, независимо от того, что написал
@@ -57,45 +84,48 @@ const PRODUCT_INTEGRITY_INSTRUCTION =
   'the product in any way.';
 
 /**
- * Основная функция: принимает путь к загруженному фото и (необязательно)
- * текстовое описание желаемого фона/стиля от пользователя — возвращает
- * массив путей к сгенерированным карточкам (без водяного знака), по одной
- * на каждый формат из CARD_VARIANTS.
+ * Основная функция: принимает путь к загруженному фото, (необязательное)
+ * текстовое описание от пользователя и желаемый размер карточки (ширина,
+ * высота в пикселях) — возвращает массив из 3 путей к сгенерированным
+ * карточкам (без водяного знака), каждая в своём стиле.
  */
-export async function generateCardVariants(originalPath, orderId, userDescription) {
+export async function generateCardVariants(originalPath, orderId, userDescription, width, height) {
+  const w = normalizeSize(width);
+  const h = normalizeSize(height);
   const provider = process.env.AI_BACKGROUND_PROVIDER || 'stub';
 
-  let baseBuffer; // то, что дальше кадрируется под каждый формат
-  let aiPhotoBuffer = null;
+  const results = [];
 
   if (provider === 'openai_full') {
-    // Режим "всё в одном": один вызов OpenAI прямо на исходное фото —
-    // и вырезание фона, и генерация нового делаются моделью сама, без
-    // отдельного remove.bg/Picsart. См. предупреждение в tryGenerateAiPhotoFull.
-    baseBuffer = fs.readFileSync(originalPath);
-    aiPhotoBuffer = await tryGenerateAiPhotoFull(baseBuffer, userDescription);
+    // Режим "всё в одном": каждый вызов идёт прямо на исходное фото — модель
+    // сама и убирает старый фон, и рисует новый. См. предупреждение ниже
+    // в tryGenerateAiPhotoFull про отсутствие точной маски.
+    const originalBuffer = fs.readFileSync(originalPath);
+    for (const style of STYLE_VARIATIONS) {
+      const aiPhotoBuffer = await tryGenerateAiPhotoFull(originalBuffer, userDescription, style.styleHint);
+      const finalPath = aiPhotoBuffer
+        ? await renderCardFromAiPhoto(aiPhotoBuffer, style.name, w, h, orderId)
+        : await renderCardWithGradientStub(originalBuffer, style, w, h, orderId);
+      results.push({ style: style.name, label: style.name, width: w, height: h, path: finalPath });
+    }
   } else {
-    // Обычный режим: сначала точное вырезание товара специализированным
-    // сервисом (remove.bg/Picsart), потом (опционально) ИИ дорисовывает
-    // фон СТРОГО в прозрачной области — пиксели товара гарантированно
-    // не меняются.
-    baseBuffer = await getProductCutout(originalPath);
-    aiPhotoBuffer = await tryGenerateAiPhoto(baseBuffer, userDescription);
-  }
-
-  const results = [];
-  for (const style of CARD_VARIANTS) {
-    const finalPath = aiPhotoBuffer
-      ? await renderCardFromAiPhoto(aiPhotoBuffer, style, orderId)
-      : await renderCardWithGradientStub(baseBuffer, style, orderId);
-    results.push({ style: style.name, label: style.label, width: style.width, height: style.height, path: finalPath });
+    // Обычный режим: вырезаем товар ОДИН раз (это не про стиль, это точная
+    // маска), а дальше на его основе — 3 разных ИИ-генерации фона.
+    const cutoutBuffer = await getProductCutout(originalPath);
+    for (const style of STYLE_VARIATIONS) {
+      const aiPhotoBuffer = await tryGenerateAiPhoto(cutoutBuffer, userDescription, style.styleHint);
+      const finalPath = aiPhotoBuffer
+        ? await renderCardFromAiPhoto(aiPhotoBuffer, style.name, w, h, orderId)
+        : await renderCardWithGradientStub(cutoutBuffer, style, w, h, orderId);
+      results.push({ style: style.name, label: style.name, width: w, height: h, path: finalPath });
+    }
   }
 
   return results;
 }
 
 // ---------------------------------------------------------------------------
-// Шаг 1: вырезание товара с фона
+// Вырезание товара с фона
 // ---------------------------------------------------------------------------
 
 async function getProductCutout(originalPath) {
@@ -107,23 +137,14 @@ async function getProductCutout(originalPath) {
   if (provider === 'picsart') {
     return removeBgViaPicsartApi(originalPath);
   }
-  // ЗАГЛУШКА: просто берём исходное фото как есть, без реального удаления фона
-  // (у этого буфера НЕТ альфа-канала, поэтому ИИ-генерация фона в шаге 2
-  // автоматически пропускается — ей нужен прозрачный фон, см. tryGenerateAiPhoto).
   return fs.readFileSync(originalPath);
 }
 
 // ---------------------------------------------------------------------------
-// Шаг 2: реальная ИИ-генерация фона (OpenAI Images API, edit endpoint)
+// Реальная ИИ-генерация фона (OpenAI Images API, edit endpoint)
 // ---------------------------------------------------------------------------
 
-/**
- * Пытается сгенерировать фон вокруг вырезанного товара через OpenAI.
- * Возвращает Buffer готового фото (товар + новый фон) или null, если ИИ
- * не настроен / не смог — в этом случае вызывающий код использует
- * запасной вариант с плоским градиентом.
- */
-async function tryGenerateAiPhoto(cutoutBuffer, userDescription) {
+async function tryGenerateAiPhoto(cutoutBuffer, userDescription, styleHint) {
   const provider = process.env.AI_BACKGROUND_PROVIDER || 'stub';
   if (provider !== 'openai') return null;
 
@@ -133,9 +154,6 @@ async function tryGenerateAiPhoto(cutoutBuffer, userDescription) {
     return null;
   }
 
-  // Для маски по альфа-каналу нужен реально прозрачный фон — если товар не
-  // был вырезан (PHOTO_API_PROVIDER=stub), у картинки нет альфа-канала и
-  // ИИ-редактирование не будет работать так, как задумано.
   const meta = await sharp(cutoutBuffer).metadata();
   if (!meta.hasAlpha) {
     console.warn(
@@ -146,7 +164,7 @@ async function tryGenerateAiPhoto(cutoutBuffer, userDescription) {
   }
 
   try {
-    return await generateAiPhotoViaOpenAi(cutoutBuffer, userDescription);
+    return await generateAiPhotoViaOpenAi(cutoutBuffer, userDescription, styleHint);
   } catch (err) {
     console.error('Ошибка ИИ-генерации фона (OpenAI), использую запасной вариант с градиентом:', err);
     return null;
@@ -154,37 +172,44 @@ async function tryGenerateAiPhoto(cutoutBuffer, userDescription) {
 }
 
 /**
- * Собирает финальный промпт для ИИ.
- *
- * Если пользователь что-то написал — используем ЕГО текст как есть (плюс
- * только нейтральные технические требования к качеству, которые не спорят
- * со стилем, который он описал). Раньше сюда всегда доклеивался фиксированный
- * промпт "чистый минималистичный студийный фон" — из-за этого описание
- * пользователя фактически смешивалось с чужим сценарием и результат мог не
- * соответствовать тому, что он просил. Дефолтный фон теперь используется
- * ТОЛЬКО когда пользователь вообще ничего не написал.
+ * Собирает финальный промпт: описание пользователя (если есть) как есть +
+ * стилевое направление этого конкретного варианта + технические требования.
+ * Если пользователь ничего не написал — базой становится сам styleHint.
  */
-function buildPrompt(userDescription, envOverrideVarName, { requireProductIntegrity = false } = {}) {
+function buildPrompt(userDescription, envOverrideVarName, styleHint, { requireProductIntegrity = false } = {}) {
   const description = (userDescription || '').trim();
   const integrityPart = requireProductIntegrity ? ` ${PRODUCT_INTEGRITY_INSTRUCTION}` : '';
+  const envOverride = process.env[envOverrideVarName];
 
+  let corePrompt;
   if (description) {
-    return `${description}. ${QUALITY_SUFFIX}${integrityPart}`;
+    corePrompt = `${description}, ${styleHint || DEFAULT_BACKGROUND_PROMPT}`;
+  } else {
+    corePrompt = `${envOverride ? envOverride + ', ' : ''}${styleHint || DEFAULT_BACKGROUND_PROMPT}`;
   }
 
-  const fallbackPrompt = process.env[envOverrideVarName] || DEFAULT_BACKGROUND_PROMPT;
-  return `${fallbackPrompt}. ${QUALITY_SUFFIX}${integrityPart}`;
+  return `${corePrompt}. ${QUALITY_SUFFIX}${integrityPart}`;
 }
 
-async function generateAiPhotoViaOpenAi(cutoutBuffer, userDescription) {
+/** Выбирает размер генерации у OpenAI (фиксированные варианты), ближе всего
+ * к соотношению сторон, которое просил пользователь — так меньше приходится
+ * докадрировать и композиция страдает меньше. Явный OPENAI_IMAGE_SIZE в .env
+ * всегда побеждает, если задан. */
+function pickGenerationSize(width, height) {
+  const envSize = process.env.OPENAI_IMAGE_SIZE;
+  if (envSize) return envSize;
+
+  const ratio = width / height;
+  if (ratio > 1.15) return '1536x1024';
+  if (ratio < 0.87) return '1024x1536';
+  return '1024x1024';
+}
+
+async function generateAiPhotoViaOpenAi(cutoutBuffer, userDescription, styleHint) {
   const apiKey = process.env.OPENAI_API_KEY;
   const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
-  const prompt = buildPrompt(userDescription, 'AI_BACKGROUND_PROMPT');
-
-  // OpenAI ограничивает размеры фиксированным набором — берём портретный,
-  // ближе всего к большинству карточек; под конкретный формат картинка
-  // потом докадрируется через sharp (renderCardFromAiPhoto).
-  const size = process.env.OPENAI_IMAGE_SIZE || '1024x1536';
+  const prompt = buildPrompt(userDescription, 'AI_BACKGROUND_PROMPT', styleHint);
+  const size = pickGenerationSize(1024, 1024); // без размера карточки на этом этапе — докадрируем позже
 
   const FormData = (await import('form-data')).default;
   const form = new FormData();
@@ -216,21 +241,10 @@ async function generateAiPhotoViaOpenAi(cutoutBuffer, userDescription) {
 }
 
 // ---------------------------------------------------------------------------
-// Режим "всё в одном" (AI_BACKGROUND_PROVIDER=openai_full): один вызов OpenAI
-// прямо на исходное фото — модель сама и убирает старый фон, и рисует новый,
-// без отдельного remove.bg/Picsart.
-//
-// ⚠️ ВАЖНЫЙ КОМПРОМИСС. В обычном режиме (AI_BACKGROUND_PROVIDER=openai +
-// PHOTO_API_PROVIDER=removebg|picsart) прозрачность из remove.bg/Picsart
-// используется как ТОЧНАЯ маска — OpenAI физически не может тронуть пиксели
-// товара, редактируется только прозрачная область. Здесь же маски нет:
-// OpenAI просто получает целое фото и текстовую инструкцию "не меняй товар,
-// поменяй только фон" — современные модели соблюдают такую инструкцию
-// достаточно хорошо, но НЕ дают гарантии пиксель-в-пиксель, в отличие от
-// маски.
+// Режим "всё в одном" (AI_BACKGROUND_PROVIDER=openai_full)
 // ---------------------------------------------------------------------------
 
-async function tryGenerateAiPhotoFull(originalBuffer, userDescription) {
+async function tryGenerateAiPhotoFull(originalBuffer, userDescription, styleHint) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     console.warn('AI_BACKGROUND_PROVIDER=openai_full, но OPENAI_API_KEY не задан — использую запасной вариант с градиентом');
@@ -238,18 +252,18 @@ async function tryGenerateAiPhotoFull(originalBuffer, userDescription) {
   }
 
   try {
-    return await generateAiPhotoViaOpenAiFull(originalBuffer, userDescription);
+    return await generateAiPhotoViaOpenAiFull(originalBuffer, userDescription, styleHint);
   } catch (err) {
     console.error('Ошибка ИИ-генерации (OpenAI, режим openai_full), использую запасной вариант с градиентом:', err);
     return null;
   }
 }
 
-async function generateAiPhotoViaOpenAiFull(originalBuffer, userDescription) {
+async function generateAiPhotoViaOpenAiFull(originalBuffer, userDescription, styleHint) {
   const apiKey = process.env.OPENAI_API_KEY;
   const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
-  const prompt = buildPrompt(userDescription, 'AI_BACKGROUND_PROMPT_FULL', { requireProductIntegrity: true });
-  const size = process.env.OPENAI_IMAGE_SIZE || '1024x1536';
+  const prompt = buildPrompt(userDescription, 'AI_BACKGROUND_PROMPT_FULL', styleHint, { requireProductIntegrity: true });
+  const size = pickGenerationSize(1024, 1024);
 
   const FormData = (await import('form-data')).default;
   const form = new FormData();
@@ -281,11 +295,12 @@ async function generateAiPhotoViaOpenAiFull(originalBuffer, userDescription) {
 }
 
 /**
- * Кадрирует уже готовое ИИ-фото (товар + сгенерированный фон) под нужный формат.
+ * Кадрирует уже готовое ИИ-фото под размер, который задал пользователь.
+ * position: 'attention' — sharp сам ищет самую "интересную" (контрастную)
+ * область при обрезке, обычно это и есть товар.
  */
-async function renderCardFromAiPhoto(aiPhotoBuffer, style, orderId) {
-  const { width, height } = style;
-  const finalPath = path.join(GENERATED_DIR, `${orderId}_${style.name}_final.png`);
+async function renderCardFromAiPhoto(aiPhotoBuffer, styleName, width, height, orderId) {
+  const finalPath = path.join(GENERATED_DIR, `${orderId}_${styleName}_final.png`);
 
   await sharp(aiPhotoBuffer)
     .resize({ width, height, fit: 'cover', position: 'attention' })
@@ -296,12 +311,10 @@ async function renderCardFromAiPhoto(aiPhotoBuffer, style, orderId) {
 }
 
 /**
- * Запасной вариант без ИИ: товар на плоском градиентном фоне — работает
- * всегда, даже без единого внешнего API-ключа.
+ * Запасной вариант без ИИ: товар на плоском градиентном фоне (свой цвет для
+ * каждого из 3 стилей) — работает всегда, даже без единого внешнего API-ключа.
  */
-async function renderCardWithGradientStub(productBuffer, style, orderId) {
-  const { width, height } = style;
-
+async function renderCardWithGradientStub(productBuffer, style, width, height, orderId) {
   const backgroundSvg = Buffer.from(`
     <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       <defs>
@@ -316,7 +329,9 @@ async function renderCardWithGradientStub(productBuffer, style, orderId) {
 
   const background = await sharp(backgroundSvg).png().toBuffer();
 
-  // Уменьшаем товар, чтобы он умещался по центру карточки с отступами
+  // Уменьшаем товар, чтобы он умещался по центру карточки с отступами —
+  // fit: 'inside' гарантирует пропорциональное (без искажений) уменьшение,
+  // а центрирование ниже кладёт его ровно посередине.
   const productResized = await sharp(productBuffer)
     .resize({
       width: Math.round(width * 0.8),
@@ -340,9 +355,7 @@ async function renderCardWithGradientStub(productBuffer, style, orderId) {
 }
 
 /**
- * Накладывает водяной знак на уже сгенерированные карточки — версии для превью,
- * которые пользователь видит ДО оплаты. Принимает массив {style, width, height, path}
- * из generateCardVariants() и возвращает такой же массив для watermarked-версий.
+ * Накладывает водяной знак на уже сгенерированные карточки — версии для превью.
  */
 export async function applyWatermarkToVariants(variants, orderId) {
   const results = [];
@@ -350,7 +363,7 @@ export async function applyWatermarkToVariants(variants, orderId) {
     const watermarkSvg = Buffer.from(`
       <svg width="${variant.width}" height="${variant.height}" xmlns="http://www.w3.org/2000/svg">
         <style>
-          .wm { fill: rgba(255,255,255,0.55); font-size: 42px; font-family: sans-serif; font-weight: 700; }
+          .wm { fill: rgba(255,255,255,0.55); font-size: 84px; font-family: sans-serif; font-weight: 700; }
         </style>
         ${buildWatermarkTiles(variant.width, variant.height)}
       </svg>
@@ -366,11 +379,12 @@ export async function applyWatermarkToVariants(variants, orderId) {
   return results;
 }
 
-// Генерирует несколько повторов надписи по диагонали карточки под конкретный размер
+// Генерирует несколько повторов надписи по диагонали карточки — шрифт и шаг
+// увеличены вдвое по сравнению с прошлой версией (было 42px/200/300).
 function buildWatermarkTiles(width, height) {
   let tiles = '';
-  for (let y = 100; y < height; y += 200) {
-    for (let x = -100; x < width; x += 300) {
+  for (let y = 160; y < height; y += 340) {
+    for (let x = -150; x < width; x += 460) {
       tiles += `<text class="wm" x="${x}" y="${y}" transform="rotate(-30 ${x} ${y})">PREVIEW</text>`;
     }
   }
