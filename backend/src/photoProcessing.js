@@ -37,17 +37,24 @@ const CARD_VARIANTS = [
   { name: 'story', label: 'Сторис', width: 1080, height: 1920, gradientFrom: '#ecfdf5', gradientTo: '#d1fae5' },
 ];
 
-const DEFAULT_PROMPT =
+// Используется ТОЛЬКО если пользователь ничего не написал в поле описания —
+// нейтральный фон по умолчанию.
+const DEFAULT_BACKGROUND_PROMPT =
   'Professional e-commerce product photography background: clean, elegant, ' +
   'softly lit studio backdrop with a subtle realistic shadow beneath the product, ' +
-  'premium look, photorealistic, no text, no watermarks, no logos';
+  'premium look';
 
-const DEFAULT_PROMPT_FULL =
-  'Remove the existing background completely and replace it with a clean, softly lit ' +
-  'professional studio backdrop, premium e-commerce product photography look, photorealistic. ' +
-  'Keep the product itself exactly as in the original photo — same shape, colors, proportions, ' +
-  'text and logos on the product — do not redesign, restyle or alter the product in any way. ' +
-  'No added text, no watermarks, no extra objects.';
+// Технические требования к качеству — не про СТИЛЬ фона, поэтому не
+// противоречат описанию пользователя и добавляются всегда.
+const QUALITY_SUFFIX = 'Photorealistic, no added text, no watermarks, no logos.';
+
+// Только для режима openai_full (без точной альфа-маски) — жёсткое условие
+// "не трогай товар" обязательно всегда, независимо от того, что написал
+// пользователь про фон, иначе есть риск, что модель заодно "улучшит" сам товар.
+const PRODUCT_INTEGRITY_INSTRUCTION =
+  'Keep the product itself exactly as in the original photo — same shape, colors, ' +
+  'proportions, text and logos on the product — do not redesign, restyle or alter ' +
+  'the product in any way.';
 
 /**
  * Основная функция: принимает путь к загруженному фото и (необязательно)
@@ -146,20 +153,33 @@ async function tryGenerateAiPhoto(cutoutBuffer, userDescription) {
   }
 }
 
-function buildPrompt(userDescription, defaultPrompt, envOverrideVarName) {
-  const envOverride = process.env[envOverrideVarName];
-  const basePrompt = envOverride || defaultPrompt;
+/**
+ * Собирает финальный промпт для ИИ.
+ *
+ * Если пользователь что-то написал — используем ЕГО текст как есть (плюс
+ * только нейтральные технические требования к качеству, которые не спорят
+ * со стилем, который он описал). Раньше сюда всегда доклеивался фиксированный
+ * промпт "чистый минималистичный студийный фон" — из-за этого описание
+ * пользователя фактически смешивалось с чужим сценарием и результат мог не
+ * соответствовать тому, что он просил. Дефолтный фон теперь используется
+ * ТОЛЬКО когда пользователь вообще ничего не написал.
+ */
+function buildPrompt(userDescription, envOverrideVarName, { requireProductIntegrity = false } = {}) {
   const description = (userDescription || '').trim();
-  // Описание пользователя ставим ПЕРВЫМ — так модель приоритезирует именно
-  // его как главное творческое задание, а базовый промпт достраивает
-  // технические детали (фотореалистично, без текста/водяных знаков и т.п.)
-  return description ? `${description}. ${basePrompt}` : basePrompt;
+  const integrityPart = requireProductIntegrity ? ` ${PRODUCT_INTEGRITY_INSTRUCTION}` : '';
+
+  if (description) {
+    return `${description}. ${QUALITY_SUFFIX}${integrityPart}`;
+  }
+
+  const fallbackPrompt = process.env[envOverrideVarName] || DEFAULT_BACKGROUND_PROMPT;
+  return `${fallbackPrompt}. ${QUALITY_SUFFIX}${integrityPart}`;
 }
 
 async function generateAiPhotoViaOpenAi(cutoutBuffer, userDescription) {
   const apiKey = process.env.OPENAI_API_KEY;
   const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
-  const prompt = buildPrompt(userDescription, DEFAULT_PROMPT, 'AI_BACKGROUND_PROMPT');
+  const prompt = buildPrompt(userDescription, 'AI_BACKGROUND_PROMPT');
 
   // OpenAI ограничивает размеры фиксированным набором — берём портретный,
   // ближе всего к большинству карточек; под конкретный формат картинка
@@ -228,7 +248,7 @@ async function tryGenerateAiPhotoFull(originalBuffer, userDescription) {
 async function generateAiPhotoViaOpenAiFull(originalBuffer, userDescription) {
   const apiKey = process.env.OPENAI_API_KEY;
   const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
-  const prompt = buildPrompt(userDescription, DEFAULT_PROMPT_FULL, 'AI_BACKGROUND_PROMPT_FULL');
+  const prompt = buildPrompt(userDescription, 'AI_BACKGROUND_PROMPT_FULL', { requireProductIntegrity: true });
   const size = process.env.OPENAI_IMAGE_SIZE || '1024x1536';
 
   const FormData = (await import('form-data')).default;
