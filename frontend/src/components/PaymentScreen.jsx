@@ -6,6 +6,7 @@ import {
   checkPaymentStatus,
   finalDownloadUrl,
   finalDownloadAllUrl,
+  finalCopyTextUrl,
   getUsdtJettonWallet,
 } from '../api.js';
 import { getTelegramWebApp, hapticSuccess, hapticError } from '../telegram.js';
@@ -22,7 +23,7 @@ const METHODS = [
 // Opcode стандартного jetton transfer (TEP-74)
 const JETTON_TRANSFER_OP = 0xf8a7ea5;
 
-export default function PaymentScreen({ orderId, labels, onBack }) {
+export default function PaymentScreen({ orderId, labels, hasProductCopy, onBack }) {
   const [tonConnectUI] = useTonConnectUI();
   const address = useTonAddress();
 
@@ -200,6 +201,15 @@ export default function PaymentScreen({ orderId, labels, onBack }) {
           >
             Скачать все карточки (zip)
           </a>
+
+          {hasProductCopy && (
+            <a
+              href={finalCopyTextUrl(orderId)}
+              className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-center text-sm font-medium transition hover:bg-white/[0.06]"
+            >
+              Скачать текст карточки (txt)
+            </a>
+          )}
         </>
       ) : (
         <>

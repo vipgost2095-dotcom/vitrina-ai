@@ -23,7 +23,7 @@ export default function UploadForm({ onUploaded }) {
     setError(null);
     try {
       const result = await uploadPhoto(file, description);
-      onUploaded(result.orderId, result.previewUrls, result.styles, result.labels);
+      onUploaded(result.orderId, result.previewUrls, result.styles, result.labels, result.productCopy);
     } catch (err) {
       hapticError();
       setError(err.message);
