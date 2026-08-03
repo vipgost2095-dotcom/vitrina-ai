@@ -13,6 +13,7 @@ import { getTelegramWebApp, hapticSuccess, hapticError } from '../telegram.js';
 
 const POLL_INTERVAL_MS = 4000;
 const POLL_TIMEOUT_MS = 5 * 60 * 1000; // 5 минут ждём подтверждение в блокчейне
+const VARIANTS_COUNT = 3;
 
 const METHODS = [
   { id: 'ton', label: 'TON' },
@@ -23,7 +24,7 @@ const METHODS = [
 // Opcode стандартного jetton transfer (TEP-74)
 const JETTON_TRANSFER_OP = 0xf8a7ea5;
 
-export default function PaymentScreen({ orderId, labels, hasProductCopy, onBack }) {
+export default function PaymentScreen({ t, orderId, hasProductCopy, onBack }) {
   const [tonConnectUI] = useTonConnectUI();
   const address = useTonAddress();
 
@@ -52,7 +53,7 @@ export default function PaymentScreen({ orderId, labels, hasProductCopy, onBack 
       } else if (Date.now() > pollDeadline.current) {
         clearInterval(pollTimer.current);
         setStatus('error');
-        setError('Не удалось подтвердить оплату за отведённое время. Попробуйте ещё раз.');
+        setError(t.timeoutError);
       }
     } catch (err) {
       // Разовая ошибка сети не должна прерывать поллинг — попробуем на следующем тике
@@ -134,7 +135,7 @@ export default function PaymentScreen({ orderId, labels, hasProductCopy, onBack 
     tg.openInvoice(payment.invoiceLink, (invoiceStatus) => {
       if (invoiceStatus === 'cancelled' || invoiceStatus === 'failed') {
         setStatus('error');
-        setError('Оплата Stars не была завершена');
+        setError(t.starsNotCompleted);
         clearInterval(pollTimer.current);
       }
     });
@@ -142,7 +143,7 @@ export default function PaymentScreen({ orderId, labels, hasProductCopy, onBack 
 
   async function handlePay() {
     if ((method === 'ton' || method === 'usdt') && !address) {
-      setError('Сначала подключите TON-кошелёк');
+      setError(t.connectWalletFirst);
       return;
     }
 
@@ -158,7 +159,7 @@ export default function PaymentScreen({ orderId, labels, hasProductCopy, onBack 
     } catch (err) {
       hapticError();
       setStatus('error');
-      setError(err.message || 'Оплата не прошла или была отменена');
+      setError(err.message || 'Payment failed');
     }
   }
 
@@ -169,7 +170,7 @@ export default function PaymentScreen({ orderId, labels, hasProductCopy, onBack 
           onClick={onBack}
           className="flex w-fit items-center gap-1 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-sm text-tg-hint transition hover:text-tg-text"
         >
-          ← Назад
+          {t.previewBack}
         </button>
       )}
 
@@ -177,20 +178,18 @@ export default function PaymentScreen({ orderId, labels, hasProductCopy, onBack 
         <>
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 text-center shadow-xl backdrop-blur">
             <div className="text-3xl">✅</div>
-            <h2 className="mt-2 text-lg font-bold tracking-tight">Оплата подтверждена</h2>
-            <p className="mt-1 text-sm text-tg-hint">
-              Карточки уже отправлены вам в чат с ботом. Также можно скачать их здесь:
-            </p>
+            <h2 className="mt-2 text-lg font-bold tracking-tight">{t.paidTitle}</h2>
+            <p className="mt-1 text-sm text-tg-hint">{t.paidSubtitle}</p>
           </div>
 
           <div className="flex flex-col gap-2">
-            {(labels?.length ? labels : [1, 2, 3]).map((label, index) => (
+            {Array.from({ length: VARIANTS_COUNT }, (_, index) => (
               <a
                 key={index}
                 href={finalDownloadUrl(orderId, index)}
                 className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-center text-sm font-medium transition hover:bg-white/[0.06]"
               >
-                Скачать: {typeof label === 'string' ? label : `вариант ${label}`}
+                {t.downloadOne(t.variant(index + 1))}
               </a>
             ))}
           </div>
@@ -199,7 +198,7 @@ export default function PaymentScreen({ orderId, labels, hasProductCopy, onBack 
             href={finalDownloadAllUrl(orderId)}
             className="w-full rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 px-4 py-3.5 text-center font-semibold text-white shadow-lg shadow-purple-500/20 transition active:scale-[0.98]"
           >
-            Скачать все карточки (zip)
+            {t.downloadZip}
           </a>
 
           {hasProductCopy && (
@@ -207,14 +206,14 @@ export default function PaymentScreen({ orderId, labels, hasProductCopy, onBack 
               href={finalCopyTextUrl(orderId)}
               className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-center text-sm font-medium transition hover:bg-white/[0.06]"
             >
-              Скачать текст карточки (txt)
+              {t.downloadText}
             </a>
           )}
         </>
       ) : (
         <>
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-xl backdrop-blur">
-            <h2 className="text-lg font-bold tracking-tight">Способ оплаты</h2>
+            <h2 className="text-lg font-bold tracking-tight">{t.paymentMethodTitle}</h2>
 
             <div className="mt-3 flex gap-2">
               {METHODS.map((m) => (
@@ -236,9 +235,7 @@ export default function PaymentScreen({ orderId, labels, hasProductCopy, onBack 
 
           {status === 'waiting' && (
             <p className="text-center text-sm text-tg-hint">
-              {method === 'stars'
-                ? 'Ждём подтверждение оплаты от Telegram…'
-                : 'Ждём подтверждение транзакции в блокчейне TON…'}
+              {method === 'stars' ? t.waitingStars : t.waitingTon}
             </p>
           )}
           {error && <p className="rounded-2xl bg-red-500/10 px-4 py-3 text-center text-sm text-red-500">{error}</p>}
@@ -248,10 +245,9 @@ export default function PaymentScreen({ orderId, labels, hasProductCopy, onBack 
             disabled={status === 'sending' || status === 'waiting'}
             className="w-full rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 px-4 py-3.5 font-semibold text-white shadow-lg shadow-purple-500/20 transition active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100"
           >
-            {status === 'sending' && 'Открываем оплату…'}
-            {status === 'waiting' && 'Проверяем оплату…'}
-            {(status === 'idle' || status === 'error') &&
-              `Оплатить через ${METHODS.find((m) => m.id === method).label}`}
+            {status === 'sending' && t.sendingPayment}
+            {status === 'waiting' && t.checkingPayment}
+            {(status === 'idle' || status === 'error') && t.payVia(METHODS.find((m) => m.id === method).label)}
           </button>
         </>
       )}
