@@ -10,9 +10,10 @@ function authHeaders() {
   return { 'X-Telegram-Init-Data': getInitData() };
 }
 
-export async function uploadPhoto(file) {
+export async function uploadPhoto(file, description) {
   const formData = new FormData();
   formData.append('photo', file);
+  if (description) formData.append('description', description);
 
   const res = await fetch(`${BASE_URL}/api/upload`, {
     method: 'POST',
@@ -24,7 +25,7 @@ export async function uploadPhoto(file) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || 'Не удалось загрузить фото');
   }
-  return res.json(); // { orderId, previewUrls: [4 шт.], styles: [4 шт.] }
+  return res.json(); // { orderId, previewUrls, styles, labels }
 }
 
 // previewUrls, которые вернул /api/upload, уже полные относительные пути —
