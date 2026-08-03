@@ -1,13 +1,30 @@
 // photoProcessing.js
-// Генерирует НЕСКОЛЬКО (4) разных по стилю карточек товара из одного исходного фото.
+// Генерирует карточки товара под разные площадки (Wildberries, Ozon, Яндекс
+// Маркет, универсальная) из одного исходного фото. Два независимых этапа:
 //
-// Сейчас это ЗАГЛУШКА на базе sharp: кладёт товар на разные градиентные подложки
-// с разным оформлением (акцентная плашка, цвета, тень) — выглядит презентабельно
-// и работает без внешних сервисов.
+// 1) Вырезание товара с фона — реальный внешний сервис (remove.bg / Picsart),
+//    настраивается через .env: PHOTO_API_PROVIDER=removebg|picsart.
+//    Возвращает PNG с прозрачным фоном (альфа-канал).
 //
-// Чтобы подключить реальный внешний сервис (удаление фона / ИИ-генерация фона),
-// замените вызов внутри generateCardVariants() — заготовки для remove.bg и
-// Picsart ниже, включаются через .env: PHOTO_API_PROVIDER=removebg|picsart.
+// 2) Генерация нового фона под товар — реальный ИИ через OpenAI Images API
+//    (модель gpt-image-1, режим /v1/images/edits): на вход идёт PNG с
+//    прозрачным фоном из шага 1, ИИ "дорисовывает" прозрачную область по
+//    текстовому промпту, товар при этом не трогает (OpenAI использует
+//    альфа-канал входного изображения как маску, если явную маску не
+//    передавать — именно на этом построена вся эта фича).
+//    Настраивается через .env: AI_BACKGROUND_PROVIDER=openai + OPENAI_API_KEY.
+//
+// Без ключей оба шага работают как раньше — простая заглушка на sharp
+// (исходное фото как есть + плоский градиентный фон), чтобы проект был
+// рабочим "из коробки" без единого внешнего API.
+//
+// ⚠️ ВАЖНО про размеры и правила площадок: цифры ниже — общеизвестные на
+// момент написания ориентиры, а не гарантированно актуальные требования.
+// У Wildberries/Ozon/Я.Маркета периодически меняются правила модерации
+// карточек (например, часто ГЛАВНОЕ фото должно быть на чистом/белом фоне
+// БЕЗ текста и плашек — цветные варианты с бейджем лучше использовать как
+// 2-е/3-е фото в карточке товара, а не как первое). Перед публикацией
+// стоит свериться с актуальными требованиями в личном кабинете продавца.
 
 import sharp from 'sharp';
 import fetch from 'node-fetch';
@@ -17,61 +34,105 @@ import fs from 'node:fs';
 const GENERATED_DIR = process.env.GENERATED_DIR || './generated';
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
 
-const CARD_WIDTH = 1080;
-const CARD_HEIGHT = 1350; // формат 4:5, удобно под соцсети/маркетплейсы
-
-// Описание 4 стилей карточки. Каждый — свой градиент фона, цвет плашки-бейджа
-// и подпись на ней. Дальше можно легко добавить 5-й, 6-й вариант и т.д.
-const CARD_STYLES = [
+// Пресеты под конкретные площадки: свой размер холста (ширина/высота) и
+// оформление плашки. Цвета градиента используются только в режиме
+// заглушки (без ИИ) — как фон-подложка. Дальше можно легко добавить ещё
+// одну площадку — просто новый объект в этот массив.
+const MARKETPLACE_STYLES = [
   {
-    name: 'minimal',
+    name: 'wildberries',
+    label: 'Wildberries',
+    // WB рекомендует карточки 900×1200 (соотношение 3:4)
+    width: 900,
+    height: 1200,
+    gradientFrom: '#6d28d9',
+    gradientTo: '#a21caf',
+    badgeText: 'WB',
+    badgeColor: '#ffffff',
+    badgeTextColor: '#6d28d9',
+    aiPromptHint: 'elegant studio backdrop in deep purple and magenta tones',
+  },
+  {
+    name: 'ozon',
+    label: 'Ozon',
+    // Ozon рекомендует квадратные карточки, до 4000×4000, здесь берём 1000×1000
+    width: 1000,
+    height: 1000,
+    gradientFrom: '#0050e6',
+    gradientTo: '#3b82f6',
+    badgeText: 'OZON',
+    badgeColor: '#ffffff',
+    badgeTextColor: '#0050e6',
+    aiPromptHint: 'clean studio backdrop in cool blue tones',
+  },
+  {
+    name: 'yandex_market',
+    label: 'Яндекс Маркет',
+    width: 1000,
+    height: 1000,
+    gradientFrom: '#ffd60a',
+    gradientTo: '#ffc300',
+    badgeText: 'МАРКЕТ',
+    badgeColor: '#1a1a1a',
+    badgeTextColor: '#ffd60a',
+    aiPromptHint: 'bright studio backdrop in warm yellow tones',
+  },
+  {
+    name: 'universal',
+    label: 'Универсальная (соцсети/сайт)',
+    // формат 4:5 — удобно и для Instagram/VK, и как доп. фото на любой площадке
+    width: 1080,
+    height: 1350,
     gradientFrom: '#f5f3ff',
     gradientTo: '#e0e7ff',
     badgeText: null, // без плашки — чистый минималистичный вариант
     badgeColor: '#4f46e5',
-  },
-  {
-    name: 'dark_premium',
-    gradientFrom: '#111827',
-    gradientTo: '#1f2937',
-    badgeText: 'PREMIUM',
-    badgeColor: '#d4af37',
-    darkBackground: true,
-  },
-  {
-    name: 'bright_sale',
-    gradientFrom: '#fb7185',
-    gradientTo: '#f97316',
-    badgeText: 'SALE',
-    badgeColor: '#ffffff',
-    badgeTextColor: '#f97316',
-  },
-  {
-    name: 'pastel_new',
-    gradientFrom: '#d1fae5',
-    gradientTo: '#a7f3d0',
-    badgeText: 'NEW',
-    badgeColor: '#059669',
+    aiPromptHint: 'soft neutral studio backdrop, light and airy',
   },
 ];
 
 /**
- * Основная функция: принимает путь к загруженному фото, возвращает массив из
- * 4 путей к сгенерированным карточкам (без водяного знака), по одной на стиль.
+ * Основная функция: принимает путь к загруженному фото, возвращает массив
+ * путей к сгенерированным карточкам (без водяного знака) — по одной на
+ * площадку из MARKETPLACE_STYLES.
  */
 export async function generateCardVariants(originalPath, orderId) {
-  const productBuffer = await getProductBuffer(originalPath);
-  const results = [];
+  const provider = process.env.AI_BACKGROUND_PROVIDER || 'stub';
 
-  for (const style of CARD_STYLES) {
-    const finalPath = await renderCard(productBuffer, style, orderId);
-    results.push({ style: style.name, path: finalPath });
+  let baseBuffer; // то, что дальше кадрируется под каждую площадку
+  let aiPhotoBuffer = null;
+
+  if (provider === 'openai_full') {
+    // Режим "всё в одном": один вызов OpenAI прямо на исходное фото —
+    // и вырезание фона, и генерация нового делаются моделью сама, без
+    // отдельного remove.bg/Picsart. См. предупреждение в tryGenerateAiPhotoFull.
+    baseBuffer = fs.readFileSync(originalPath);
+    aiPhotoBuffer = await tryGenerateAiPhotoFull(baseBuffer);
+  } else {
+    // Обычный режим: сначала точное вырезание товара специализированным
+    // сервисом (remove.bg/Picsart), потом (опционально) ИИ дорисовывает
+    // фон СТРОГО в прозрачной области — пиксели товара гарантированно
+    // не меняются.
+    baseBuffer = await getProductCutout(originalPath);
+    aiPhotoBuffer = await tryGenerateAiPhoto(baseBuffer);
+  }
+
+  const results = [];
+  for (const style of MARKETPLACE_STYLES) {
+    const finalPath = aiPhotoBuffer
+      ? await renderCardFromAiPhoto(aiPhotoBuffer, style, orderId)
+      : await renderCardWithGradientStub(baseBuffer, style, orderId);
+    results.push({ style: style.name, label: style.label, width: style.width, height: style.height, path: finalPath });
   }
 
   return results;
 }
 
-async function getProductBuffer(originalPath) {
+// ---------------------------------------------------------------------------
+// Шаг 1: вырезание товара с фона
+// ---------------------------------------------------------------------------
+
+async function getProductCutout(originalPath) {
   const provider = process.env.PHOTO_API_PROVIDER || 'stub';
 
   if (provider === 'removebg') {
@@ -80,13 +141,209 @@ async function getProductBuffer(originalPath) {
   if (provider === 'picsart') {
     return removeBgViaPicsartApi(originalPath);
   }
-  // ЗАГЛУШКА: просто берём исходное фото как есть, без реального удаления фона.
+  // ЗАГЛУШКА: просто берём исходное фото как есть, без реального удаления фона
+  // (у этого буфера НЕТ альфа-канала, поэтому ИИ-генерация фона в шаге 2
+  // автоматически пропускается — ей нужен прозрачный фон, см. tryGenerateAiPhoto).
   return fs.readFileSync(originalPath);
 }
 
-async function renderCard(productBuffer, style, orderId) {
+// ---------------------------------------------------------------------------
+// Шаг 2: реальная ИИ-генерация фона (OpenAI Images API, edit endpoint)
+// ---------------------------------------------------------------------------
+
+/**
+ * Пытается сгенерировать фон вокруг вырезанного товара через OpenAI.
+ * Возвращает Buffer готового фото (товар + новый фон) или null, если ИИ
+ * не настроен / не смог — в этом случае вызывающий код использует
+ * запасной вариант с плоским градиентом.
+ */
+async function tryGenerateAiPhoto(cutoutBuffer) {
+  const provider = process.env.AI_BACKGROUND_PROVIDER || 'stub';
+  if (provider !== 'openai') return null;
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    console.warn('AI_BACKGROUND_PROVIDER=openai, но OPENAI_API_KEY не задан — использую запасной вариант с градиентом');
+    return null;
+  }
+
+  // Для маски по альфа-каналу нужен реально прозрачный фон — если товар не
+  // был вырезан (PHOTO_API_PROVIDER=stub), у картинки нет альфа-канала и
+  // ИИ-редактирование не будет работать так, как задумано.
+  const meta = await sharp(cutoutBuffer).metadata();
+  if (!meta.hasAlpha) {
+    console.warn(
+      'Для ИИ-генерации фона нужен вырезанный товар с прозрачным фоном ' +
+        '(PHOTO_API_PROVIDER=removebg|picsart) — сейчас фон не прозрачный, пропускаю ИИ-шаг'
+    );
+    return null;
+  }
+
+  try {
+    return await generateAiPhotoViaOpenAi(cutoutBuffer);
+  } catch (err) {
+    console.error('Ошибка ИИ-генерации фона (OpenAI), использую запасной вариант с градиентом:', err);
+    return null;
+  }
+}
+
+async function generateAiPhotoViaOpenAi(cutoutBuffer) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
+
+  // Промпт можно полностью переопределить в .env (AI_BACKGROUND_PROMPT),
+  // если хочется другого настроения фона (например под конкретную нишу товаров).
+  const prompt =
+    process.env.AI_BACKGROUND_PROMPT ||
+    'Professional e-commerce product photography background: clean, elegant, ' +
+      'softly lit studio backdrop with a subtle realistic shadow beneath the product, ' +
+      'premium marketplace look, photorealistic, no text, no watermarks, no logos';
+
+  // OpenAI ограничивает размеры фиксированным набором — берём портретный,
+  // ближе всего к большинству карточек площадок; под конкретный размер
+  // каждой площадки картинка потом докадрируется через sharp (renderCardFromAiPhoto).
+  const size = process.env.OPENAI_IMAGE_SIZE || '1024x1536';
+
+  const FormData = (await import('form-data')).default;
+  const form = new FormData();
+  form.append('model', model);
+  form.append('image', cutoutBuffer, { filename: 'product.png', contentType: 'image/png' });
+  form.append('prompt', prompt);
+  form.append('size', size);
+  form.append('n', '1');
+
+  const response = await fetch('https://api.openai.com/v1/images/edits', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, ...form.getHeaders() },
+    body: form,
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw new Error(`OpenAI images/edits вернул ошибку ${response.status}: ${errText}`);
+  }
+
+  const data = await response.json();
+  const item = data?.data?.[0];
+  if (item?.b64_json) return Buffer.from(item.b64_json, 'base64');
+  if (item?.url) {
+    const imgResponse = await fetch(item.url);
+    return Buffer.from(await imgResponse.arrayBuffer());
+  }
+  throw new Error('OpenAI не вернул изображение в ответе');
+}
+
+// ---------------------------------------------------------------------------
+// Режим "всё в одном" (AI_BACKGROUND_PROVIDER=openai_full): один вызов OpenAI
+// прямо на исходное фото — модель сама и убирает старый фон, и рисует новый,
+// без отдельного remove.bg/Picsart.
+//
+// ⚠️ ВАЖНЫЙ КОМПРОМИСС. В обычном режиме (AI_BACKGROUND_PROVIDER=openai +
+// PHOTO_API_PROVIDER=removebg|picsart) прозрачность из remove.bg/Picsart
+// используется как ТОЧНАЯ маска — OpenAI физически не может тронуть пиксели
+// товара, редактируется только прозрачная область. Здесь же маски нет:
+// OpenAI просто получает целое фото и текстовую инструкцию "не меняй товар,
+// поменяй только фон" — современные модели соблюдают такую инструкцию
+// достаточно хорошо, но НЕ дают гарантии пиксель-в-пиксель, в отличие от
+// маски. Для соцсетей/черновиков — нормально. Для карточки, по которой
+// покупатель принимает решение о покупке на маркетплейсе, надёжнее и
+// честнее обычный режим с точным вырезанием.
+// ---------------------------------------------------------------------------
+
+async function tryGenerateAiPhotoFull(originalBuffer) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    console.warn('AI_BACKGROUND_PROVIDER=openai_full, но OPENAI_API_KEY не задан — использую запасной вариант с градиентом');
+    return null;
+  }
+
+  try {
+    return await generateAiPhotoViaOpenAiFull(originalBuffer);
+  } catch (err) {
+    console.error('Ошибка ИИ-генерации (OpenAI, режим openai_full), использую запасной вариант с градиентом:', err);
+    return null;
+  }
+}
+
+async function generateAiPhotoViaOpenAiFull(originalBuffer) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
+
+  const prompt =
+    process.env.AI_BACKGROUND_PROMPT_FULL ||
+    'Remove the existing background completely and replace it with a clean, softly lit ' +
+      'professional studio backdrop, premium e-commerce product photography look, photorealistic. ' +
+      'Keep the product itself exactly as in the original photo — same shape, colors, proportions, ' +
+      'text and logos on the product — do not redesign, restyle or alter the product in any way. ' +
+      'No added text, no watermarks, no extra objects.';
+
+  const size = process.env.OPENAI_IMAGE_SIZE || '1024x1536';
+
+  const FormData = (await import('form-data')).default;
+  const form = new FormData();
+  form.append('model', model);
+  form.append('image', originalBuffer, { filename: 'product.png', contentType: 'image/png' });
+  form.append('prompt', prompt);
+  form.append('size', size);
+  form.append('n', '1');
+
+  const response = await fetch('https://api.openai.com/v1/images/edits', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, ...form.getHeaders() },
+    body: form,
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw new Error(`OpenAI images/edits вернул ошибку ${response.status}: ${errText}`);
+  }
+
+  const data = await response.json();
+  const item = data?.data?.[0];
+  if (item?.b64_json) return Buffer.from(item.b64_json, 'base64');
+  if (item?.url) {
+    const imgResponse = await fetch(item.url);
+    return Buffer.from(await imgResponse.arrayBuffer());
+  }
+  throw new Error('OpenAI не вернул изображение в ответе');
+}
+
+/**
+ * Кадрирует уже готовое ИИ-фото (товар + сгенерированный фон) под размер
+ * конкретной площадки и накладывает плашку (WB/OZON/МАРКЕТ и т.п.).
+ */
+async function renderCardFromAiPhoto(aiPhotoBuffer, style, orderId) {
+  const { width, height } = style;
+
+  const resized = await sharp(aiPhotoBuffer)
+    .resize({ width, height, fit: 'cover', position: 'attention' })
+    .toBuffer();
+
+  const finalPath = path.join(GENERATED_DIR, `${orderId}_${style.name}_final.png`);
+
+  if (style.badgeText) {
+    const badgeSvg = Buffer.from(`
+      <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+        ${buildBadgeSvg(style)}
+      </svg>
+    `);
+    await sharp(resized).composite([{ input: badgeSvg, top: 0, left: 0 }]).png().toFile(finalPath);
+  } else {
+    await sharp(resized).png().toFile(finalPath);
+  }
+
+  return finalPath;
+}
+
+/**
+ * Запасной вариант без ИИ: товар на плоском градиентном фоне — работает
+ * всегда, даже без единого внешнего API-ключа.
+ */
+async function renderCardWithGradientStub(productBuffer, style, orderId) {
+  const { width, height } = style;
+
   const backgroundSvg = Buffer.from(`
-    <svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stop-color="${style.gradientFrom}"/>
@@ -103,15 +360,15 @@ async function renderCard(productBuffer, style, orderId) {
   // Уменьшаем товар, чтобы он умещался по центру карточки с отступами
   const productResized = await sharp(productBuffer)
     .resize({
-      width: Math.round(CARD_WIDTH * 0.8),
-      height: Math.round(CARD_HEIGHT * 0.72),
+      width: Math.round(width * 0.8),
+      height: Math.round(height * 0.72),
       fit: 'inside',
     })
     .toBuffer();
 
   const productMeta = await sharp(productResized).metadata();
-  const left = Math.round((CARD_WIDTH - productMeta.width) / 2);
-  const top = Math.round((CARD_HEIGHT - productMeta.height) / 2) + 40; // чуть ниже центра, чтобы не биться с плашкой
+  const left = Math.round((width - productMeta.width) / 2);
+  const top = Math.round((height - productMeta.height) / 2) + Math.round(height * 0.03); // чуть ниже центра, чтобы не биться с плашкой
 
   const finalPath = path.join(GENERATED_DIR, `${orderId}_${style.name}_final.png`);
 
@@ -123,50 +380,52 @@ async function renderCard(productBuffer, style, orderId) {
   return finalPath;
 }
 
-// Плашка-бейдж в углу карточки (PREMIUM / SALE / NEW и т.п.)
+// Плашка-бейдж в углу карточки (WB / OZON / МАРКЕТ и т.п.)
 function buildBadgeSvg(style) {
   const textColor = style.badgeTextColor || '#ffffff';
   return `
     <g>
       <rect x="40" y="40" width="220" height="64" rx="16" fill="${style.badgeColor}"/>
       <text x="150" y="82" text-anchor="middle" font-family="sans-serif" font-weight="700"
-            font-size="28" fill="${textColor}">${style.badgeText}</text>
+            font-size="26" fill="${textColor}">${style.badgeText}</text>
     </g>
   `;
 }
 
 /**
  * Накладывает водяной знак на уже сгенерированные карточки — версии для превью,
- * которые пользователь видит ДО оплаты. Принимает массив {style, path} из
- * generateCardVariants() и возвращает массив {style, path} для watermarked-версий.
+ * которые пользователь видит ДО оплаты. Принимает массив {style, width, height, path}
+ * из generateCardVariants() и возвращает такой же массив для watermarked-версий.
+ * Размер водяного знака подгоняется под РЕАЛЬНЫЙ размер каждой карточки —
+ * у площадок он разный (900×1200, 1000×1000, 1080×1350).
  */
 export async function applyWatermarkToVariants(variants, orderId) {
-  const watermarkSvg = Buffer.from(`
-    <svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
-      <style>
-        .wm { fill: rgba(255,255,255,0.55); font-size: 46px; font-family: sans-serif; font-weight: 700; }
-      </style>
-      ${buildWatermarkTiles()}
-    </svg>
-  `);
-
   const results = [];
   for (const variant of variants) {
+    const watermarkSvg = Buffer.from(`
+      <svg width="${variant.width}" height="${variant.height}" xmlns="http://www.w3.org/2000/svg">
+        <style>
+          .wm { fill: rgba(255,255,255,0.55); font-size: 42px; font-family: sans-serif; font-weight: 700; }
+        </style>
+        ${buildWatermarkTiles(variant.width, variant.height)}
+      </svg>
+    `);
+
     const watermarkedPath = path.join(GENERATED_DIR, `${orderId}_${variant.style}_watermarked.png`);
     await sharp(variant.path)
       .composite([{ input: watermarkSvg, top: 0, left: 0 }])
       .png()
       .toFile(watermarkedPath);
-    results.push({ style: variant.style, path: watermarkedPath });
+    results.push({ style: variant.style, label: variant.label, width: variant.width, height: variant.height, path: watermarkedPath });
   }
   return results;
 }
 
-// Генерирует несколько повторов надписи по диагонали карточки
-function buildWatermarkTiles() {
+// Генерирует несколько повторов надписи по диагонали карточки под конкретный размер
+function buildWatermarkTiles(width, height) {
   let tiles = '';
-  for (let y = 100; y < CARD_HEIGHT; y += 220) {
-    for (let x = -100; x < CARD_WIDTH; x += 320) {
+  for (let y = 100; y < height; y += 200) {
+    for (let x = -100; x < width; x += 300) {
       tiles += `<text class="wm" x="${x}" y="${y}" transform="rotate(-30 ${x} ${y})">PREVIEW</text>`;
     }
   }
@@ -174,12 +433,10 @@ function buildWatermarkTiles() {
 }
 
 // ---------------------------------------------------------------------------
-// Заготовки интеграций с реальными внешними API. Раскомментируйте и впишите
-// свой ключ в .env (PHOTO_API_KEY), чтобы включить настоящее удаление фона.
+// Реальные интеграции с сервисами вырезания фона.
 // ---------------------------------------------------------------------------
 
 async function removeBgViaRemoveBgApi(originalPath) {
-  // TODO: вставьте свой API-ключ remove.bg в .env как PHOTO_API_KEY
   const apiKey = process.env.PHOTO_API_KEY;
   if (!apiKey) throw new Error('PHOTO_API_KEY не задан для провайдера removebg');
 
@@ -198,7 +455,6 @@ async function removeBgViaRemoveBgApi(originalPath) {
 }
 
 async function removeBgViaPicsartApi(originalPath) {
-  // TODO: вставьте свой API-ключ Picsart в .env как PHOTO_API_KEY
   const apiKey = process.env.PHOTO_API_KEY;
   if (!apiKey) throw new Error('PHOTO_API_KEY не задан для провайдера picsart');
 
