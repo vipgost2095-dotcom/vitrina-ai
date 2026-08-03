@@ -29,7 +29,7 @@ export async function sendCardsToUser(telegramId, finalPaths) {
     type: 'photo',
     media: `attach://photo${index}`,
     ...(index === 0
-      ? { caption: '🎉 Оплата подтверждена! Вот 4 варианта карточки вашего товара — выбирайте любой.' }
+      ? { caption: '🎉 Оплата подтверждена! Вот карточки вашего товара под Wildberries, Ozon и другие площадки.' }
       : {}),
   }));
 
