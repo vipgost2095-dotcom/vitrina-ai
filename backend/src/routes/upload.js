@@ -1,5 +1,6 @@
-// routes/upload.js — приём фото от пользователя, генерация 4 разных карточек
-// + превью с водяным знаком для каждой из них
+// routes/upload.js — приём фото от пользователя, генерация карточек под разные
+// площадки (Wildberries, Ozon, Яндекс Маркет, универсальная) + превью с
+// водяным знаком для каждой из них
 
 import { Router } from 'express';
 import multer from 'multer';
@@ -58,9 +59,10 @@ router.post('/upload', upload.single('photo'), async (req, res) => {
 
     res.json({
       orderId,
-      // 4 URL превью — по одному на каждый стиль карточки
+      // URL превью — по одному на каждую площадку (Wildberries/Ozon/Я.Маркет/универсальная)
       previewUrls: watermarkedVariants.map((v, index) => `/api/preview/${orderId}/${index}`),
       styles: watermarkedVariants.map((v) => v.style),
+      labels: watermarkedVariants.map((v) => v.label),
     });
   } catch (err) {
     console.error('Ошибка при обработке фото:', err);
