@@ -5,6 +5,7 @@ import { hapticError } from '../telegram.js';
 export default function UploadForm({ onUploaded }) {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
+  const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -21,7 +22,7 @@ export default function UploadForm({ onUploaded }) {
     setLoading(true);
     setError(null);
     try {
-      const result = await uploadPhoto(file);
+      const result = await uploadPhoto(file, description);
       onUploaded(result.orderId, result.previewUrls, result.styles, result.labels);
     } catch (err) {
       hapticError();
@@ -32,26 +33,46 @@ export default function UploadForm({ onUploaded }) {
   }
 
   return (
-    <div className="flex flex-col items-center gap-4 px-4 py-6">
-      <h2 className="text-lg font-semibold">Загрузите фото товара</h2>
+    <div className="mx-auto flex w-full max-w-sm flex-col gap-4">
+      <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-xl backdrop-blur">
+        <h2 className="text-lg font-bold tracking-tight">Фото товара</h2>
+        <p className="mt-1 text-sm text-tg-hint">Загрузите фото — ИИ уберёт фон и нарисует новый</p>
 
-      <label className="w-full max-w-sm cursor-pointer rounded-2xl border-2 border-dashed border-gray-300 p-6 text-center hover:border-tg-button transition">
-        <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
-        {preview ? (
-          <img src={preview} alt="Предпросмотр" className="mx-auto max-h-64 rounded-xl object-contain" />
-        ) : (
-          <span className="text-tg-hint">Нажмите, чтобы выбрать фото</span>
-        )}
-      </label>
+        <label className="mt-4 block cursor-pointer overflow-hidden rounded-2xl border-2 border-dashed border-tg-hint/30 transition hover:border-tg-button">
+          <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+          {preview ? (
+            <img src={preview} alt="Предпросмотр" className="max-h-64 w-full object-contain p-2" />
+          ) : (
+            <div className="flex flex-col items-center gap-2 py-10 text-tg-hint">
+              <span className="text-3xl">📷</span>
+              <span className="text-sm">Нажмите, чтобы выбрать фото</span>
+            </div>
+          )}
+        </label>
+      </div>
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-xl backdrop-blur">
+        <label className="text-sm font-semibold">Опишите желаемый фон/стиль <span className="font-normal text-tg-hint">(необязательно)</span></label>
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Например: премиум чёрный фон с золотыми акцентами, или пастельный минимализм"
+          rows={3}
+          maxLength={500}
+          className="mt-2 w-full resize-none rounded-2xl border border-tg-hint/20 bg-transparent p-3 text-sm outline-none placeholder:text-tg-hint/60 focus:border-tg-button"
+        />
+      </div>
+
+      {error && (
+        <p className="rounded-2xl bg-red-500/10 px-4 py-3 text-sm text-red-500">{error}</p>
+      )}
 
       <button
         onClick={handleSubmit}
         disabled={!file || loading}
-        className="w-full max-w-sm rounded-2xl bg-tg-button px-4 py-3 font-medium text-tg-buttonText disabled:opacity-50"
+        className="w-full rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 px-4 py-3.5 font-semibold text-white shadow-lg shadow-purple-500/20 transition active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100"
       >
-        {loading ? 'Генерируем карточки под площадки…' : 'Создать карточки'}
+        {loading ? 'Генерируем карточки…' : 'Создать карточки'}
       </button>
     </div>
   );

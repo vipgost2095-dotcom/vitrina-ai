@@ -22,7 +22,7 @@ const METHODS = [
 // Opcode стандартного jetton transfer (TEP-74)
 const JETTON_TRANSFER_OP = 0xf8a7ea5;
 
-export default function PaymentScreen({ orderId, labels }) {
+export default function PaymentScreen({ orderId, labels, onBack }) {
   const [tonConnectUI] = useTonConnectUI();
   const address = useTonAddress();
 
@@ -162,20 +162,32 @@ export default function PaymentScreen({ orderId, labels }) {
   }
 
   return (
-    <div className="flex flex-col items-center gap-4 px-4 py-6">
+    <div className="mx-auto flex w-full max-w-sm flex-col gap-4">
+      {status !== 'paid' && status !== 'sending' && status !== 'waiting' && (
+        <button
+          onClick={onBack}
+          className="flex w-fit items-center gap-1 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-sm text-tg-hint transition hover:text-tg-text"
+        >
+          ← Назад
+        </button>
+      )}
+
       {status === 'paid' ? (
         <>
-          <h2 className="text-lg font-semibold">✅ Оплата подтверждена</h2>
-          <p className="text-sm text-tg-hint text-center">
-            Все карточки уже отправлены вам в чат с ботом. Также можно скачать их здесь:
-          </p>
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 text-center shadow-xl backdrop-blur">
+            <div className="text-3xl">✅</div>
+            <h2 className="mt-2 text-lg font-bold tracking-tight">Оплата подтверждена</h2>
+            <p className="mt-1 text-sm text-tg-hint">
+              Карточки уже отправлены вам в чат с ботом. Также можно скачать их здесь:
+            </p>
+          </div>
 
-          <div className="flex w-full max-w-sm flex-col gap-2">
-            {(labels?.length ? labels : [1, 2, 3, 4]).map((label, index) => (
+          <div className="flex flex-col gap-2">
+            {(labels?.length ? labels : [1, 2, 3]).map((label, index) => (
               <a
                 key={index}
                 href={finalDownloadUrl(orderId, index)}
-                className="w-full rounded-xl border border-gray-300 px-4 py-2 text-center text-sm font-medium text-tg-text"
+                className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-center text-sm font-medium transition hover:bg-white/[0.06]"
               >
                 Скачать: {typeof label === 'string' ? label : `вариант ${label}`}
               </a>
@@ -184,45 +196,47 @@ export default function PaymentScreen({ orderId, labels }) {
 
           <a
             href={finalDownloadAllUrl(orderId)}
-            className="w-full max-w-sm rounded-2xl bg-tg-button px-4 py-3 text-center font-medium text-tg-buttonText"
+            className="w-full rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 px-4 py-3.5 text-center font-semibold text-white shadow-lg shadow-purple-500/20 transition active:scale-[0.98]"
           >
             Скачать все карточки (zip)
           </a>
         </>
       ) : (
         <>
-          <h2 className="text-lg font-semibold">Способ оплаты</h2>
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-xl backdrop-blur">
+            <h2 className="text-lg font-bold tracking-tight">Способ оплаты</h2>
 
-          <div className="flex w-full max-w-sm gap-2">
-            {METHODS.map((m) => (
-              <button
-                key={m.id}
-                onClick={() => setMethod(m.id)}
-                disabled={status === 'sending' || status === 'waiting'}
-                className={`flex-1 rounded-xl border px-3 py-2 text-sm font-medium transition ${
-                  method === m.id
-                    ? 'border-tg-button bg-tg-button text-tg-buttonText'
-                    : 'border-gray-300 text-tg-text'
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
+            <div className="mt-3 flex gap-2">
+              {METHODS.map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => setMethod(m.id)}
+                  disabled={status === 'sending' || status === 'waiting'}
+                  className={`flex-1 rounded-xl border px-3 py-2 text-sm font-medium transition ${
+                    method === m.id
+                      ? 'border-transparent bg-gradient-to-r from-indigo-500 to-fuchsia-500 text-white shadow-md'
+                      : 'border-white/10 text-tg-hint'
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {status === 'waiting' && (
-            <p className="text-sm text-tg-hint">
+            <p className="text-center text-sm text-tg-hint">
               {method === 'stars'
                 ? 'Ждём подтверждение оплаты от Telegram…'
                 : 'Ждём подтверждение транзакции в блокчейне TON…'}
             </p>
           )}
-          {error && <p className="text-sm text-red-500 text-center">{error}</p>}
+          {error && <p className="rounded-2xl bg-red-500/10 px-4 py-3 text-center text-sm text-red-500">{error}</p>}
 
           <button
             onClick={handlePay}
             disabled={status === 'sending' || status === 'waiting'}
-            className="w-full max-w-sm rounded-2xl bg-tg-button px-4 py-3 font-medium text-tg-buttonText disabled:opacity-50"
+            className="w-full rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 px-4 py-3.5 font-semibold text-white shadow-lg shadow-purple-500/20 transition active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100"
           >
             {status === 'sending' && 'Открываем оплату…'}
             {status === 'waiting' && 'Проверяем оплату…'}

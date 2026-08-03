@@ -7,15 +7,15 @@ export default function WalletConnect() {
   const address = useTonAddress();
 
   return (
-    <div className="flex flex-col items-center gap-2 py-4">
+    <div className="mx-auto flex w-full max-w-sm flex-col items-center gap-2 rounded-3xl border border-white/10 bg-white/[0.03] p-4 shadow-xl backdrop-blur">
       <TonConnectButton />
       {address ? (
         <p className="text-xs text-tg-hint">
           Подключён кошелёк: {address.slice(0, 4)}...{address.slice(-4)}
         </p>
       ) : (
-        <p className="text-sm text-tg-hint">
-          Подключите TON-кошелёк, если хотите платить TON или USDT (для Stars не нужно)
+        <p className="text-center text-xs text-tg-hint">
+          Кошелёк нужен только для оплаты TON/USDT (для Stars не нужен)
         </p>
       )}
     </div>
