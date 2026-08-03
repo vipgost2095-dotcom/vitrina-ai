@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { initTelegram } from './telegram.js';
+import { getStrings } from './i18n.js';
 import WalletConnect from './components/WalletConnect.jsx';
 import UploadForm from './components/UploadForm.jsx';
 import CardPreview from './components/CardPreview.jsx';
@@ -14,17 +15,39 @@ const STEPS = {
 };
 const STEP_ORDER = [STEPS.UPLOAD, STEPS.PREVIEW, STEPS.PAYMENT];
 
+function getInitialLang() {
+  try {
+    const saved = window.localStorage?.getItem('vitrinaai_lang');
+    if (saved === 'ru' || saved === 'en') return saved;
+  } catch {
+    // localStorage может быть недоступен — просто используем язык по умолчанию
+  }
+  return 'ru';
+}
+
 export default function App() {
   const [step, setStep] = useState(STEPS.UPLOAD);
   const [orderId, setOrderId] = useState(null);
   const [previewUrls, setPreviewUrls] = useState([]);
   const [labels, setLabels] = useState([]);
   const [productCopy, setProductCopy] = useState(null);
+  const [lang, setLang] = useState(getInitialLang);
 
   useEffect(() => {
     initTelegram();
   }, []);
 
+  function toggleLang() {
+    const next = lang === 'ru' ? 'en' : 'ru';
+    setLang(next);
+    try {
+      window.localStorage?.setItem('vitrinaai_lang', next);
+    } catch {
+      // ничего страшного, если сохранить не получилось — просто не запомнится между визитами
+    }
+  }
+
+  const t = getStrings(lang);
   const stepIndex = STEP_ORDER.indexOf(step);
 
   return (
@@ -35,11 +58,19 @@ export default function App() {
       <div className="pointer-events-none absolute -left-16 bottom-0 h-56 w-56 rounded-full bg-emerald-400/10 blur-3xl" />
 
       <div className="relative flex min-h-screen flex-col">
-        <header className="px-5 pb-4 pt-6 text-center">
+        <header className="relative px-5 pb-4 pt-6 text-center">
+          <button
+            onClick={toggleLang}
+            aria-label="Switch language"
+            className="absolute right-4 top-6 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs font-semibold text-tg-hint transition hover:text-tg-text"
+          >
+            {lang === 'ru' ? '🇷🇺 RU' : '🇬🇧 EN'}
+          </button>
+
           <h1 className="bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 bg-clip-text text-2xl font-extrabold tracking-tight text-transparent">
-            ВитринаAI
+            {t.appTitle}
           </h1>
-          <p className="mt-1 text-xs text-tg-hint">Карточки товара за пару минут, с фоном от ИИ</p>
+          <p className="mt-1 text-xs text-tg-hint">{t.appSubtitle}</p>
 
           <div className="mx-auto mt-4 flex max-w-xs items-center gap-2">
             {STEP_ORDER.map((s, i) => (
@@ -56,8 +87,9 @@ export default function App() {
         <main className="flex-1 px-4 pb-10">
           {step === STEPS.UPLOAD && (
             <div className="flex flex-col gap-4">
-              <WalletConnect />
+              <WalletConnect t={t} />
               <UploadForm
+                t={t}
                 onUploaded={(id, urls, uploadedStyles, uploadedLabels, uploadedCopy) => {
                   setOrderId(id);
                   setPreviewUrls(urls);
@@ -71,8 +103,8 @@ export default function App() {
 
           {step === STEPS.PREVIEW && (
             <CardPreview
+              t={t}
               previewUrls={previewUrls}
-              labels={labels}
               productCopy={productCopy}
               onPay={() => setStep(STEPS.PAYMENT)}
               onBack={() => setStep(STEPS.UPLOAD)}
@@ -80,7 +112,12 @@ export default function App() {
           )}
 
           {step === STEPS.PAYMENT && (
-            <PaymentScreen orderId={orderId} labels={labels} hasProductCopy={!!productCopy} onBack={() => setStep(STEPS.PREVIEW)} />
+            <PaymentScreen
+              t={t}
+              orderId={orderId}
+              hasProductCopy={!!productCopy}
+              onBack={() => setStep(STEPS.PREVIEW)}
+            />
           )}
         </main>
       </div>

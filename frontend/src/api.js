@@ -10,10 +10,12 @@ function authHeaders() {
   return { 'X-Telegram-Init-Data': getInitData() };
 }
 
-export async function uploadPhoto(file, description) {
+export async function uploadPhoto(file, description, width, height) {
   const formData = new FormData();
   formData.append('photo', file);
   if (description) formData.append('description', description);
+  if (width) formData.append('width', width);
+  if (height) formData.append('height', height);
 
   const res = await fetch(`${BASE_URL}/api/upload`, {
     method: 'POST',
