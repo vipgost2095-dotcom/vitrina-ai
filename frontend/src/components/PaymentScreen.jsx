@@ -22,7 +22,7 @@ const METHODS = [
 // Opcode стандартного jetton transfer (TEP-74)
 const JETTON_TRANSFER_OP = 0xf8a7ea5;
 
-export default function PaymentScreen({ orderId, styles }) {
+export default function PaymentScreen({ orderId, labels }) {
   const [tonConnectUI] = useTonConnectUI();
   const address = useTonAddress();
 
@@ -167,17 +167,17 @@ export default function PaymentScreen({ orderId, styles }) {
         <>
           <h2 className="text-lg font-semibold">✅ Оплата подтверждена</h2>
           <p className="text-sm text-tg-hint text-center">
-            Все 4 карточки уже отправлены вам в чат с ботом. Также можно скачать их здесь:
+            Все карточки уже отправлены вам в чат с ботом. Также можно скачать их здесь:
           </p>
 
           <div className="flex w-full max-w-sm flex-col gap-2">
-            {(styles?.length ? styles : [0, 1, 2, 3]).map((style, index) => (
+            {(labels?.length ? labels : [1, 2, 3, 4]).map((label, index) => (
               <a
                 key={index}
                 href={finalDownloadUrl(orderId, index)}
                 className="w-full rounded-xl border border-gray-300 px-4 py-2 text-center text-sm font-medium text-tg-text"
               >
-                Скачать вариант {index + 1}
+                Скачать: {typeof label === 'string' ? label : `вариант ${label}`}
               </a>
             ))}
           </div>
@@ -186,7 +186,7 @@ export default function PaymentScreen({ orderId, styles }) {
             href={finalDownloadAllUrl(orderId)}
             className="w-full max-w-sm rounded-2xl bg-tg-button px-4 py-3 text-center font-medium text-tg-buttonText"
           >
-            Скачать все 4 карточки (zip)
+            Скачать все карточки (zip)
           </a>
         </>
       ) : (

@@ -22,7 +22,7 @@ export default function UploadForm({ onUploaded }) {
     setError(null);
     try {
       const result = await uploadPhoto(file);
-      onUploaded(result.orderId, result.previewUrls, result.styles);
+      onUploaded(result.orderId, result.previewUrls, result.styles, result.labels);
     } catch (err) {
       hapticError();
       setError(err.message);
@@ -51,7 +51,7 @@ export default function UploadForm({ onUploaded }) {
         disabled={!file || loading}
         className="w-full max-w-sm rounded-2xl bg-tg-button px-4 py-3 font-medium text-tg-buttonText disabled:opacity-50"
       >
-        {loading ? 'Генерируем 4 варианта карточки…' : 'Создать карточки'}
+        {loading ? 'Генерируем карточки под площадки…' : 'Создать карточки'}
       </button>
     </div>
   );
