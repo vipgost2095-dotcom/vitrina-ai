@@ -83,3 +83,8 @@ export function finalDownloadUrl(orderId, index) {
 export function finalDownloadAllUrl(orderId) {
   return `${BASE_URL}/api/final/${orderId}/all.zip`;
 }
+
+// Скачивание текста карточки (название/описание/буллеты) отдельным .txt
+export function finalCopyTextUrl(orderId) {
+  return `${BASE_URL}/api/final/${orderId}/copy.txt`;
+}

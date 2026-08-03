@@ -19,6 +19,7 @@ export default function App() {
   const [orderId, setOrderId] = useState(null);
   const [previewUrls, setPreviewUrls] = useState([]);
   const [labels, setLabels] = useState([]);
+  const [productCopy, setProductCopy] = useState(null);
 
   useEffect(() => {
     initTelegram();
@@ -57,10 +58,11 @@ export default function App() {
             <div className="flex flex-col gap-4">
               <WalletConnect />
               <UploadForm
-                onUploaded={(id, urls, uploadedStyles, uploadedLabels) => {
+                onUploaded={(id, urls, uploadedStyles, uploadedLabels, uploadedCopy) => {
                   setOrderId(id);
                   setPreviewUrls(urls);
                   setLabels(uploadedLabels);
+                  setProductCopy(uploadedCopy);
                   setStep(STEPS.PREVIEW);
                 }}
               />
@@ -71,13 +73,14 @@ export default function App() {
             <CardPreview
               previewUrls={previewUrls}
               labels={labels}
+              productCopy={productCopy}
               onPay={() => setStep(STEPS.PAYMENT)}
               onBack={() => setStep(STEPS.UPLOAD)}
             />
           )}
 
           {step === STEPS.PAYMENT && (
-            <PaymentScreen orderId={orderId} labels={labels} onBack={() => setStep(STEPS.PREVIEW)} />
+            <PaymentScreen orderId={orderId} labels={labels} hasProductCopy={!!productCopy} onBack={() => setStep(STEPS.PREVIEW)} />
           )}
         </main>
       </div>
