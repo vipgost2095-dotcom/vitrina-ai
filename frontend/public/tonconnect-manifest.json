@@ -1,7 +1,5 @@
 {
-  "url": "https://your-frontend-domain.example",
+  "url": "https://strong-delight-production-9901.up.railway.app",
   "name": "ВитринаAI",
-  "iconUrl": "https://your-frontend-domain.example/icon.png",
-  "termsOfUseUrl": "https://your-frontend-domain.example/terms",
-  "privacyPolicyUrl": "https://your-frontend-domain.example/privacy"
+  "iconUrl": "https://strong-delight-production-9901.up.railway.app/icon.png"
 }
