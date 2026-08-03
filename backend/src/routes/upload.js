@@ -1,6 +1,6 @@
-// routes/upload.js — приём фото от пользователя, генерация карточек под разные
-// площадки (Wildberries, Ozon, Яндекс Маркет, универсальная) + превью с
-// водяным знаком для каждой из них
+// routes/upload.js — приём фото и (необязательного) текстового описания
+// желаемого фона/стиля от пользователя, генерация карточек в 3 форматах
+// (квадрат/портрет/сторис) + превью с водяным знаком для каждого.
 
 import { Router } from 'express';
 import multer from 'multer';
@@ -41,13 +41,17 @@ router.post('/upload', upload.single('photo'), async (req, res) => {
       return res.status(400).json({ error: 'Фото не передано (поле photo)' });
     }
 
+    // Текстовое описание желаемого фона/стиля — необязательное поле формы.
+    // Ограничиваем длину на всякий случай, чтобы не разрастался промпт.
+    const description = typeof req.body.description === 'string' ? req.body.description.slice(0, 500) : '';
+
     upsertUser({ telegramId: String(telegramUser.id), username: telegramUser.username });
 
     const orderId = uuidv4();
     createOrder({ id: orderId, telegramId: String(telegramUser.id), originalPath: req.file.path });
 
-    // Генерируем 4 разных по стилю карточки (без вотемарки) — они понадобятся после оплаты
-    const finalVariants = await generateCardVariants(req.file.path, orderId);
+    // Генерируем карточки (без вотемарки) — они понадобятся после оплаты
+    const finalVariants = await generateCardVariants(req.file.path, orderId, description);
     // И версии с водяным знаком — именно их видит пользователь на превью
     const watermarkedVariants = await applyWatermarkToVariants(finalVariants, orderId);
 
@@ -59,7 +63,6 @@ router.post('/upload', upload.single('photo'), async (req, res) => {
 
     res.json({
       orderId,
-      // URL превью — по одному на каждую площадку (Wildberries/Ozon/Я.Маркет/универсальная)
       previewUrls: watermarkedVariants.map((v, index) => `/api/preview/${orderId}/${index}`),
       styles: watermarkedVariants.map((v) => v.style),
       labels: watermarkedVariants.map((v) => v.label),
