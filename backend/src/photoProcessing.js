@@ -528,17 +528,25 @@ async function renderCardWithGradientStub(productBuffer, style, width, height, o
 export async function applyWatermarkToVariants(variants, orderId) {
   const results = [];
   for (const variant of variants) {
-    // Размер шрифта — ДОЛЯ от размера карточки (не фиксированные пиксели):
-    // пользователь теперь сам задаёт размер (200-2048px), и фиксированное
-    // число либо тонуло на маленьких карточках, либо было бы гигантским на
-    // больших. 25% от меньшей стороны — это увеличенный (втрое против
-    // самой первой версии) и хорошо заметный на любом размере знак.
-    const fontSize = Math.max(28, Math.round(Math.min(variant.width, variant.height) * 0.25));
+    // Размер шрифта — доля от меньшей стороны карточки. Первая версия была
+    // 25%, потом стало 25%×3 после отдельного запроса. Буквальные "ещё ×5"
+    // от этого (125% стороны карточки) я проверил рендером — и это ХУЖЕ, не
+    // лучше: буквы становятся крупнее самой карточки, повторов на холсте
+    // остаётся мало, и между гигантскими буквами образуются большие пустые
+    // проёмы — скриншотить становится ЛЕГЧЕ, а не сложнее. Вместо этого
+    // добился нужного эффекта (реально невозможно вырезать чистый кусок для
+    // скрина) через более умеренное увеличение размера (45% стороны, это
+    // почти вдвое крупнее прежнего) вместе с НАМНОГО более плотной сеткой
+    // повторов (шаг сетки теперь меньше самой буквы — повторы перекрываются
+    // друг с другом). См. buildWatermarkTiles ниже — именно плотность
+    // перекрытия, а не голый размер буквы, определяет, останется ли на
+    // карточке хоть один чистый участок для скриншота.
+    const fontSize = Math.max(28, Math.round(Math.min(variant.width, variant.height) * 0.45));
 
     const watermarkSvg = Buffer.from(`
       <svg width="${variant.width}" height="${variant.height}" xmlns="http://www.w3.org/2000/svg">
         <style>
-          .wm { fill: rgba(255,255,255,0.55); font-size: ${fontSize}px; font-family: sans-serif; font-weight: 700; }
+          .wm { fill: rgba(255,255,255,0.6); font-size: ${fontSize}px; font-family: sans-serif; font-weight: 700; }
         </style>
         ${buildWatermarkTiles(variant.width, variant.height, fontSize)}
       </svg>
@@ -554,12 +562,14 @@ export async function applyWatermarkToVariants(variants, orderId) {
   return results;
 }
 
-// Генерирует несколько повторов надписи по диагонали карточки — шаг сетки
-// считается от fontSize, чтобы плитка оставалась пропорциональной на любом
-// размере карточки (пользователь теперь задаёт размер сам).
+// Плотная сетка перекрывающихся повторов — шаг сетки МЕНЬШЕ размера самой
+// буквы (0.55×/0.85× вместо прежних 2.2×/3.0×), из-за этого соседние повторы
+// слова "PREVIEW" накладываются друг на друга и закрывают собой пустоты
+// внутри самих букв — именно это (а не увеличение размера буквы саму по
+// себе) реально не оставляет на карточке чистого участка для скриншота.
 function buildWatermarkTiles(width, height, fontSize) {
-  const yStep = Math.round(fontSize * 2.2);
-  const xStep = Math.round(fontSize * 3.0);
+  const yStep = Math.round(fontSize * 0.55);
+  const xStep = Math.round(fontSize * 0.85);
   let tiles = '';
   for (let y = fontSize; y < height + fontSize; y += yStep) {
     for (let x = -fontSize; x < width + fontSize; x += xStep) {
