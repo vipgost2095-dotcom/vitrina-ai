@@ -6,7 +6,7 @@ const DEFAULT_SIZE = { width: 1000, height: 1000 };
 const MIN_SIZE = 200;
 const MAX_SIZE = 2048;
 
-export default function UploadForm({ t, onUploaded }) {
+export default function UploadForm({ t, status, onUploaded, onStatusChange }) {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [description, setDescription] = useState('');
@@ -14,6 +14,23 @@ export default function UploadForm({ t, onUploaded }) {
   const [height, setHeight] = useState(DEFAULT_SIZE.height);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  const stylePresets = [
+    [t.stylePresetMinimal, t.stylePresetMinimalText],
+    [t.stylePresetLuxury, t.stylePresetLuxuryText],
+    [t.stylePresetBright, t.stylePresetBrightText],
+    [t.stylePresetNature, t.stylePresetNatureText],
+    [t.stylePresetTech, t.stylePresetTechText],
+    [t.stylePresetRetro, t.stylePresetRetroText],
+  ];
+
+  const sizePresets = [
+    [t.sizePresetSquare, 1000, 1000],
+    [t.sizePresetPortrait, 1080, 1350],
+    [t.sizePresetStory, 1080, 1920],
+  ];
+
+  const limitReached = status && status.freeGenerationsRemaining <= 0;
 
   function handleFileChange(e) {
     const f = e.target.files?.[0];
@@ -30,12 +47,17 @@ export default function UploadForm({ t, onUploaded }) {
   }
 
   async function handleSubmit() {
-    if (!file) return;
+    if (!file || limitReached) return;
     setLoading(true);
     setError(null);
     try {
       const result = await uploadPhoto(file, description, clampSize(width), clampSize(height));
       onUploaded(result.orderId, result.previewUrls, result.styles, result.labels, result.productCopy);
+      onStatusChange?.({
+        freeGenerationsUsed: result.freeGenerationsUsed,
+        freeGenerationsLimit: result.freeGenerationsLimit,
+        freeGenerationsRemaining: Math.max(0, result.freeGenerationsLimit - result.freeGenerationsUsed),
+      });
     } catch (err) {
       hapticError();
       setError(err.message);
@@ -46,6 +68,14 @@ export default function UploadForm({ t, onUploaded }) {
 
   return (
     <div className="mx-auto flex w-full max-w-sm flex-col gap-4">
+      {status && (
+        <p className={`text-center text-xs ${limitReached ? 'text-red-400' : 'text-tg-hint'}`}>
+          {limitReached
+            ? t.freeGenerationsLimitReached
+            : t.freeGenerationsRemaining(status.freeGenerationsRemaining, status.freeGenerationsLimit)}
+        </p>
+      )}
+
       <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-xl backdrop-blur">
         <h2 className="text-lg font-bold tracking-tight">{t.uploadTitle}</h2>
         <p className="mt-1 text-sm text-tg-hint">{t.uploadSubtitle}</p>
@@ -75,6 +105,20 @@ export default function UploadForm({ t, onUploaded }) {
           maxLength={500}
           className="mt-2 w-full resize-none rounded-2xl border border-tg-hint/20 bg-transparent p-3 text-sm outline-none placeholder:text-tg-hint/60 focus:border-tg-button"
         />
+
+        <p className="mt-3 text-xs font-semibold text-tg-hint">{t.stylePresetsLabel}</p>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {stylePresets.map(([label, text]) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => setDescription(text)}
+              className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs text-tg-hint transition hover:text-tg-text"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-xl backdrop-blur">
@@ -103,6 +147,23 @@ export default function UploadForm({ t, onUploaded }) {
             />
           </div>
         </div>
+
+        <p className="mt-3 text-xs font-semibold text-tg-hint">{t.sizePresetsLabel}</p>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {sizePresets.map(([label, w, h]) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => {
+                setWidth(w);
+                setHeight(h);
+              }}
+              className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs text-tg-hint transition hover:text-tg-text"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {error && (
@@ -111,7 +172,7 @@ export default function UploadForm({ t, onUploaded }) {
 
       <button
         onClick={handleSubmit}
-        disabled={!file || loading}
+        disabled={!file || loading || limitReached}
         className="w-full rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 px-4 py-3.5 font-semibold text-white shadow-lg shadow-purple-500/20 transition active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100"
       >
         {loading ? t.submitLoading : t.submitIdle}

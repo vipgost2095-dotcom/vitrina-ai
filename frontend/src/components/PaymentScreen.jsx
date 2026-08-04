@@ -24,7 +24,7 @@ const METHODS = [
 // Opcode стандартного jetton transfer (TEP-74)
 const JETTON_TRANSFER_OP = 0xf8a7ea5;
 
-export default function PaymentScreen({ t, orderId, hasProductCopy, onBack }) {
+export default function PaymentScreen({ t, orderId, hasProductCopy, discountPercent, onBack, onPaid }) {
   const [tonConnectUI] = useTonConnectUI();
   const address = useTonAddress();
 
@@ -50,6 +50,7 @@ export default function PaymentScreen({ t, orderId, hasProductCopy, onBack }) {
         clearInterval(pollTimer.current);
         hapticSuccess();
         setStatus('paid');
+        onPaid?.();
       } else if (Date.now() > pollDeadline.current) {
         clearInterval(pollTimer.current);
         setStatus('error');
@@ -213,7 +214,14 @@ export default function PaymentScreen({ t, orderId, hasProductCopy, onBack }) {
       ) : (
         <>
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-xl backdrop-blur">
-            <h2 className="text-lg font-bold tracking-tight">{t.paymentMethodTitle}</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold tracking-tight">{t.paymentMethodTitle}</h2>
+              {discountPercent > 0 && (
+                <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-400">
+                  -{discountPercent}%
+                </span>
+              )}
+            </div>
 
             <div className="mt-3 flex gap-2">
               {METHODS.map((m) => (
