@@ -75,13 +75,19 @@ const QUALITY_SUFFIX =
   'Photograph the product straight-on and level, centered in the frame, ' +
   'not tilted or rotated, no dramatic diagonal angles.';
 
-// Только для режима openai_full (без точной альфа-маски) — жёсткое условие
-// "не трогай товар" обязательно всегда, независимо от того, что написал
-// пользователь про фон, иначе есть риск, что модель заодно "улучшит" сам товар.
+// Только для режима openai_full (без точной альфа-маски) — по умолчанию
+// жёсткое условие "не трогай товар" добавляется всегда, независимо от того,
+// что написал пользователь про фон, иначе есть риск, что модель заодно
+// "улучшит"/подменит сам товар. Это единственное ограничение, которое
+// остаётся даже при "точно как написал пользователь, без ограничений" — можно
+// полностью отключить через AI_STRICT_PRODUCT_INTEGRITY=false в .env, если
+// точно понимаете, что делаете (без маски результат тогда совсем не
+// гарантирован — модель может исказить сам товар).
 const PRODUCT_INTEGRITY_INSTRUCTION =
   'Keep the product itself exactly as in the original photo — same shape, colors, ' +
   'proportions, text and logos on the product — do not redesign, restyle or alter ' +
   'the product in any way.';
+const STRICT_PRODUCT_INTEGRITY = process.env.AI_STRICT_PRODUCT_INTEGRITY !== 'false';
 
 /**
  * Основная функция: принимает путь к загруженному фото, (необязательное)
@@ -102,7 +108,7 @@ export async function generateCardVariants(originalPath, orderId, userDescriptio
     // в tryGenerateAiPhotoFull про отсутствие точной маски.
     const originalBuffer = fs.readFileSync(originalPath);
     for (const style of STYLE_VARIATIONS) {
-      const aiPhotoBuffer = await tryGenerateAiPhotoFull(originalBuffer, userDescription, style.styleHint);
+      const aiPhotoBuffer = await tryGenerateAiPhotoFull(originalBuffer, userDescription, style.styleHint, w, h);
       const finalPath = aiPhotoBuffer
         ? await renderCardFromAiPhoto(aiPhotoBuffer, style.name, w, h, orderId)
         : await renderCardWithGradientStub(originalBuffer, style, w, h, orderId);
@@ -113,7 +119,7 @@ export async function generateCardVariants(originalPath, orderId, userDescriptio
     // маска), а дальше на его основе — 3 разных ИИ-генерации фона.
     const cutoutBuffer = await getProductCutout(originalPath);
     for (const style of STYLE_VARIATIONS) {
-      const aiPhotoBuffer = await tryGenerateAiPhoto(cutoutBuffer, userDescription, style.styleHint);
+      const aiPhotoBuffer = await tryGenerateAiPhoto(cutoutBuffer, userDescription, style.styleHint, w, h);
       const finalPath = aiPhotoBuffer
         ? await renderCardFromAiPhoto(aiPhotoBuffer, style.name, w, h, orderId)
         : await renderCardWithGradientStub(cutoutBuffer, style, w, h, orderId);
@@ -144,7 +150,7 @@ async function getProductCutout(originalPath) {
 // Реальная ИИ-генерация фона (OpenAI Images API, edit endpoint)
 // ---------------------------------------------------------------------------
 
-async function tryGenerateAiPhoto(cutoutBuffer, userDescription, styleHint) {
+async function tryGenerateAiPhoto(cutoutBuffer, userDescription, styleHint, width, height) {
   const provider = process.env.AI_BACKGROUND_PROVIDER || 'stub';
   if (provider !== 'openai') return null;
 
@@ -164,7 +170,7 @@ async function tryGenerateAiPhoto(cutoutBuffer, userDescription, styleHint) {
   }
 
   try {
-    return await generateAiPhotoViaOpenAi(cutoutBuffer, userDescription, styleHint);
+    return await generateAiPhotoViaOpenAi(cutoutBuffer, userDescription, styleHint, width, height);
   } catch (err) {
     console.error('Ошибка ИИ-генерации фона (OpenAI), использую запасной вариант с градиентом:', err);
     return null;
@@ -176,40 +182,83 @@ async function tryGenerateAiPhoto(cutoutBuffer, userDescription, styleHint) {
  * стилевое направление этого конкретного варианта + технические требования.
  * Если пользователь ничего не написал — базой становится сам styleHint.
  */
+/**
+ * Собирает финальный промпт для ИИ.
+ *
+ * ⚠️ ЕСЛИ ПОЛЬЗОВАТЕЛЬ ЧТО-ТО НАПИСАЛ — используем ЕГО ТЕКСТ БУКВАЛЬНО, без
+ * единой добавки: ни стилевой подсказки варианта, ни "сними прямо, без
+ * наклона", ни "без текста/водяных знаков". Раньше сюда всё равно доклеивались
+ * технические требования — из-за этого результат мог не совпадать с тем, что
+ * человек реально просил (например, если он хотел динамичный ракурс под
+ * углом или текст на карточке, "не наклоняй"/"без текста" ему бы мешали).
+ * Это осознанный компромисс: без страховки "без лишнего текста" модель
+ * иногда может добавить случайные надписи/артефакты на фон — так теперь
+ * работает по вашему прямому запросу "без ограничений".
+ *
+ * Если пользователь НИЧЕГО не написал — используется прежняя логика с
+ * запасным промптом по умолчанию (стилевая подсказка варианта + технические
+ * требования) — там ограничивать нечего, это уже наш собственный дефолт.
+ */
 function buildPrompt(userDescription, envOverrideVarName, styleHint, { requireProductIntegrity = false } = {}) {
   const description = (userDescription || '').trim();
-  const integrityPart = requireProductIntegrity ? ` ${PRODUCT_INTEGRITY_INSTRUCTION}` : '';
-  const envOverride = process.env[envOverrideVarName];
+  const integrityPart = requireProductIntegrity && STRICT_PRODUCT_INTEGRITY ? ` ${PRODUCT_INTEGRITY_INSTRUCTION}` : '';
 
-  let corePrompt;
   if (description) {
-    corePrompt = `${description}, ${styleHint || DEFAULT_BACKGROUND_PROMPT}`;
-  } else {
-    corePrompt = `${envOverride ? envOverride + ', ' : ''}${styleHint || DEFAULT_BACKGROUND_PROMPT}`;
+    // Буквально то, что написал пользователь. requireProductIntegrity
+    // (только режим openai_full) — единственное, что всё равно добавляется,
+    // и не про стиль, а про то, чтобы ИИ не подменил сам товар — см.
+    // AI_STRICT_PRODUCT_INTEGRITY в .env, если хотите убрать и это тоже.
+    return integrityPart ? `${description}.${integrityPart}` : description;
   }
 
+  const envOverride = process.env[envOverrideVarName];
+  const corePrompt = `${envOverride ? envOverride + ', ' : ''}${styleHint || DEFAULT_BACKGROUND_PROMPT}`;
   return `${corePrompt}. ${QUALITY_SUFFIX}${integrityPart}`;
 }
 
-/** Выбирает размер генерации у OpenAI (фиксированные варианты), ближе всего
- * к соотношению сторон, которое просил пользователь — так меньше приходится
- * докадрировать и композиция страдает меньше. Явный OPENAI_IMAGE_SIZE в .env
- * всегда побеждает, если задан. */
-function pickGenerationSize(width, height) {
-  const envSize = process.env.OPENAI_IMAGE_SIZE;
-  if (envSize) return envSize;
-
-  const ratio = width / height;
-  if (ratio > 1.15) return '1536x1024';
-  if (ratio < 0.87) return '1024x1536';
-  return '1024x1024';
+// gpt-image-2 (текущий флагман на момент написания, август 2026) умеет
+// генерировать СРАЗУ произвольный размер WIDTHxHEIGHT (кратный 16, стороны
+// от 1:3 до 3:1) — значит для него докадрирование после генерации почти не
+// нужно, картинка сразу нужных пропорций. gpt-image-1/1.5 такого не умеют —
+// у них фиксированный набор размеров, поэтому для них оставляем прежнюю
+// логику "сгенерировать ближайший подходящий формат, потом докадрировать".
+function isGptImage2(model) {
+  return /gpt-image-2/i.test(model);
 }
 
-async function generateAiPhotoViaOpenAi(cutoutBuffer, userDescription, styleHint) {
+function buildImageRequestParams(model, width, height) {
+  if (isGptImage2(model)) {
+    const clampDim = (n) => {
+      const rounded = Math.round(Math.max(256, Math.min(2048, n)) / 16) * 16;
+      return rounded;
+    };
+    let w = clampDim(width);
+    let h = clampDim(height);
+    // ограничение API: соотношение сторон должно быть от 1:3 до 3:1
+    const ratio = w / h;
+    if (ratio > 3) w = h * 3;
+    if (ratio < 1 / 3) h = w * 3;
+    return { size: `${w}x${h}` }; // без quality — у gpt-image-2 разрешение само по себе задаёт детализацию
+  }
+
+  // gpt-image-1 / gpt-image-1.5 — фиксированный набор размеров + отдельный
+  // параметр quality. Явно ставим 'high' — максимум, который поддерживает
+  // API (по умолчанию, если не указывать, используется более низкое
+  // качество/авто, а не максимальное).
+  const envSize = process.env.OPENAI_IMAGE_SIZE;
+  let size = envSize;
+  if (!size) {
+    const ratio = width / height;
+    size = ratio > 1.15 ? '1536x1024' : ratio < 0.87 ? '1024x1536' : '1024x1024';
+  }
+  return { size, quality: process.env.OPENAI_IMAGE_QUALITY || 'high' };
+}
+
+async function generateAiPhotoViaOpenAi(cutoutBuffer, userDescription, styleHint, width, height) {
   const apiKey = process.env.OPENAI_API_KEY;
   const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
   const prompt = buildPrompt(userDescription, 'AI_BACKGROUND_PROMPT', styleHint);
-  const size = pickGenerationSize(1024, 1024); // без размера карточки на этом этапе — докадрируем позже
+  const { size, quality } = buildImageRequestParams(model, width, height);
 
   const FormData = (await import('form-data')).default;
   const form = new FormData();
@@ -217,6 +266,7 @@ async function generateAiPhotoViaOpenAi(cutoutBuffer, userDescription, styleHint
   form.append('image', cutoutBuffer, { filename: 'product.png', contentType: 'image/png' });
   form.append('prompt', prompt);
   form.append('size', size);
+  if (quality) form.append('quality', quality);
   form.append('n', '1');
 
   const response = await fetch('https://api.openai.com/v1/images/edits', {
@@ -244,7 +294,7 @@ async function generateAiPhotoViaOpenAi(cutoutBuffer, userDescription, styleHint
 // Режим "всё в одном" (AI_BACKGROUND_PROVIDER=openai_full)
 // ---------------------------------------------------------------------------
 
-async function tryGenerateAiPhotoFull(originalBuffer, userDescription, styleHint) {
+async function tryGenerateAiPhotoFull(originalBuffer, userDescription, styleHint, width, height) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     console.warn('AI_BACKGROUND_PROVIDER=openai_full, но OPENAI_API_KEY не задан — использую запасной вариант с градиентом');
@@ -252,18 +302,18 @@ async function tryGenerateAiPhotoFull(originalBuffer, userDescription, styleHint
   }
 
   try {
-    return await generateAiPhotoViaOpenAiFull(originalBuffer, userDescription, styleHint);
+    return await generateAiPhotoViaOpenAiFull(originalBuffer, userDescription, styleHint, width, height);
   } catch (err) {
     console.error('Ошибка ИИ-генерации (OpenAI, режим openai_full), использую запасной вариант с градиентом:', err);
     return null;
   }
 }
 
-async function generateAiPhotoViaOpenAiFull(originalBuffer, userDescription, styleHint) {
+async function generateAiPhotoViaOpenAiFull(originalBuffer, userDescription, styleHint, width, height) {
   const apiKey = process.env.OPENAI_API_KEY;
   const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
   const prompt = buildPrompt(userDescription, 'AI_BACKGROUND_PROMPT_FULL', styleHint, { requireProductIntegrity: true });
-  const size = pickGenerationSize(1024, 1024);
+  const { size, quality } = buildImageRequestParams(model, width, height);
 
   const FormData = (await import('form-data')).default;
   const form = new FormData();
@@ -271,6 +321,7 @@ async function generateAiPhotoViaOpenAiFull(originalBuffer, userDescription, sty
   form.append('image', originalBuffer, { filename: 'product.png', contentType: 'image/png' });
   form.append('prompt', prompt);
   form.append('size', size);
+  if (quality) form.append('quality', quality);
   form.append('n', '1');
 
   const response = await fetch('https://api.openai.com/v1/images/edits', {
