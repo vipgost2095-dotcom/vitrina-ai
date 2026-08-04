@@ -90,3 +90,15 @@ export function finalDownloadAllUrl(orderId) {
 export function finalCopyTextUrl(orderId) {
   return `${BASE_URL}/api/final/${orderId}/copy.txt`;
 }
+
+// Статус пользователя: сколько бесплатных генераций осталось, реферальная скидка
+export async function getUserStatus() {
+  const res = await fetch(`${BASE_URL}/api/user/status`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Не удалось получить статус пользователя');
+  }
+  return res.json(); // { freeGenerationsUsed, freeGenerationsLimit, freeGenerationsRemaining, referralDiscountPercent }
+}

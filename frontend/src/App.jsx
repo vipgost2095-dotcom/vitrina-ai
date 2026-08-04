@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { initTelegram } from './telegram.js';
 import { getStrings } from './i18n.js';
+import { getUserStatus } from './api.js';
 import WalletConnect from './components/WalletConnect.jsx';
+import ReferralBlock from './components/ReferralBlock.jsx';
 import UploadForm from './components/UploadForm.jsx';
 import CardPreview from './components/CardPreview.jsx';
 import PaymentScreen from './components/PaymentScreen.jsx';
@@ -32,9 +34,13 @@ export default function App() {
   const [labels, setLabels] = useState([]);
   const [productCopy, setProductCopy] = useState(null);
   const [lang, setLang] = useState(getInitialLang);
+  const [userStatus, setUserStatus] = useState(null);
 
   useEffect(() => {
     initTelegram();
+    getUserStatus().then(setUserStatus).catch(() => {
+      // не критично — просто не покажем блок с лимитом/скидкой сразу
+    });
   }, []);
 
   function toggleLang() {
@@ -88,8 +94,11 @@ export default function App() {
           {step === STEPS.UPLOAD && (
             <div className="flex flex-col gap-4">
               <WalletConnect t={t} />
+              <ReferralBlock t={t} discountPercent={userStatus?.referralDiscountPercent} />
               <UploadForm
                 t={t}
+                status={userStatus}
+                onStatusChange={(partial) => setUserStatus((prev) => ({ ...prev, ...partial }))}
                 onUploaded={(id, urls, uploadedStyles, uploadedLabels, uploadedCopy) => {
                   setOrderId(id);
                   setPreviewUrls(urls);
@@ -116,7 +125,9 @@ export default function App() {
               t={t}
               orderId={orderId}
               hasProductCopy={!!productCopy}
+              discountPercent={userStatus?.referralDiscountPercent || 0}
               onBack={() => setStep(STEPS.PREVIEW)}
+              onPaid={() => getUserStatus().then(setUserStatus).catch(() => {})}
             />
           )}
         </main>

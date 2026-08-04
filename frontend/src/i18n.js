@@ -21,6 +21,33 @@ export const STRINGS = {
     sizeWidth: 'Ширина',
     sizeHeight: 'Высота',
 
+    stylePresetsLabel: 'Быстрый выбор стиля',
+    stylePresetMinimal: 'Минимализм',
+    stylePresetMinimalText: 'минималистичный светлый фон, чистые линии, много воздуха',
+    stylePresetLuxury: 'Люкс',
+    stylePresetLuxuryText: 'премиальный чёрный фон с золотыми акцентами, роскошный вид',
+    stylePresetBright: 'Яркий',
+    stylePresetBrightText: 'яркий насыщенный цветной фон, динамичный и заметный',
+    stylePresetNature: 'Природа',
+    stylePresetNatureText: 'натуральные материалы, дерево и зелень, естественное освещение',
+    stylePresetTech: 'Технологичный',
+    stylePresetTechText: 'футуристичный технологичный фон, неоновые акценты, тёмные тона',
+    stylePresetRetro: 'Ретро',
+    stylePresetRetroText: 'ретро-стиль 80-х, тёплая плёночная цветокоррекция',
+
+    sizePresetsLabel: 'Быстрый выбор размера',
+    sizePresetSquare: 'Квадрат',
+    sizePresetPortrait: 'Портрет',
+    sizePresetStory: 'Сторис',
+
+    referralTitle: '💸 Реферальная программа',
+    referralSubtitle: (percent) => `Ваша скидка: ${percent}% — приглашайте друзей, скидка растёт до 10%`,
+    referralCopyLink: 'Копировать ссылку',
+    referralLinkCopied: 'Ссылка скопирована',
+
+    freeGenerationsRemaining: (n, limit) => `Бесплатных генераций осталось: ${n} из ${limit}`,
+    freeGenerationsLimitReached: 'Бесплатные генерации закончились. Оплатите один из предыдущих заказов, чтобы получить ещё.',
+
     submitLoading: 'Генерируем карточки…',
     submitIdle: 'Создать карточки',
 
@@ -71,6 +98,33 @@ export const STRINGS = {
     sizeLabel: 'Card size, px',
     sizeWidth: 'Width',
     sizeHeight: 'Height',
+
+    stylePresetsLabel: 'Quick style pick',
+    stylePresetMinimal: 'Minimal',
+    stylePresetMinimalText: 'minimalist light background, clean lines, lots of negative space',
+    stylePresetLuxury: 'Luxury',
+    stylePresetLuxuryText: 'premium black background with gold accents, luxurious look',
+    stylePresetBright: 'Bright',
+    stylePresetBrightText: 'bright saturated colorful background, dynamic and eye-catching',
+    stylePresetNature: 'Nature',
+    stylePresetNatureText: 'natural materials, wood and greenery, natural lighting',
+    stylePresetTech: 'Tech',
+    stylePresetTechText: 'futuristic tech background, neon accents, dark tones',
+    stylePresetRetro: 'Retro',
+    stylePresetRetroText: '80s retro style, warm film color grading',
+
+    sizePresetsLabel: 'Quick size pick',
+    sizePresetSquare: 'Square',
+    sizePresetPortrait: 'Portrait',
+    sizePresetStory: 'Story',
+
+    referralTitle: '💸 Referral program',
+    referralSubtitle: (percent) => `Your discount: ${percent}% — invite friends, discount grows up to 10%`,
+    referralCopyLink: 'Copy link',
+    referralLinkCopied: 'Link copied',
+
+    freeGenerationsRemaining: (n, limit) => `Free generations left: ${n} of ${limit}`,
+    freeGenerationsLimitReached: 'Free generations are used up. Pay for one of your previous orders to get more.',
 
     submitLoading: 'Generating cards…',
     submitIdle: 'Create cards',
