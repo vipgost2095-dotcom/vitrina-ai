@@ -23,6 +23,8 @@ export default function UploadForm({ t, status, onUploaded, onStatusChange }) {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [description, setDescription] = useState('');
+  const [cardText, setCardText] = useState('');
+  const [textStyleHint, setTextStyleHint] = useState(null); // [label, hint] выбранного пресета стиля надписи
   const [width, setWidth] = useState(DEFAULT_SIZE.width);
   const [height, setHeight] = useState(DEFAULT_SIZE.height);
   const [loading, setLoading] = useState(false);
@@ -48,7 +50,17 @@ export default function UploadForm({ t, status, onUploaded, onStatusChange }) {
     [t.sizePresetStory, 1080, 1920],
   ];
 
+  const textStylePresets = [
+    [t.textStylePresetBold, t.textStylePresetBoldHint],
+    [t.textStylePresetNeon, t.textStylePresetNeonHint],
+    [t.textStylePresetHandwritten, t.textStylePresetHandwrittenHint],
+    [t.textStylePresetGraffiti, t.textStylePresetGraffitiHint],
+    [t.textStylePresetElegant, t.textStylePresetElegantHint],
+  ];
+
   const limitReached = status && status.freeGenerationsRemaining <= 0;
+  // Фото теперь необязательно — достаточно описания фона ИЛИ текста на карточке
+  const hasAnyInput = !!file || description.trim().length > 0 || cardText.trim().length > 0;
 
   function handleFileChange(e) {
     const f = e.target.files?.[0];
@@ -62,6 +74,19 @@ export default function UploadForm({ t, status, onUploaded, onStatusChange }) {
     const n = Number.parseInt(value, 10);
     if (!Number.isFinite(n)) return DEFAULT_SIZE.width;
     return Math.min(MAX_SIZE, Math.max(MIN_SIZE, n));
+  }
+
+  // Собирает итоговое описание, которое уходит в бэкенд: фон/стиль +
+  // отдельная инструкция про текст на карточке (если задан) — модель видит
+  // и то, и другое как единый текстовый промпт.
+  function buildFinalDescription() {
+    const parts = [];
+    if (description.trim()) parts.push(description.trim());
+    if (cardText.trim()) {
+      const stylePart = textStyleHint ? `, ${textStyleHint[1]}` : '';
+      parts.push(`Добавь на карточку текст "${cardText.trim()}"${stylePart}`);
+    }
+    return parts.join('. ');
   }
 
   function pollGenerationStatus(orderId) {
@@ -91,13 +116,13 @@ export default function UploadForm({ t, status, onUploaded, onStatusChange }) {
   }
 
   async function handleSubmit() {
-    if (!file || limitReached) return;
+    if (!hasAnyInput || limitReached) return;
     setLoading(true);
     setError(null);
     setProgressPercent(0);
     setProgressStep('queued');
     try {
-      const { orderId } = await startUpload(file, description, clampSize(width), clampSize(height));
+      const { orderId } = await startUpload(file, buildFinalDescription(), clampSize(width), clampSize(height));
       pollGenerationStatus(orderId);
     } catch (err) {
       hapticError();
@@ -181,6 +206,44 @@ export default function UploadForm({ t, status, onUploaded, onStatusChange }) {
       </div>
 
       <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-xl backdrop-blur">
+        <label className="text-sm font-semibold">
+          {t.textOnCardLabel} <span className="font-normal text-tg-hint">{t.textOnCardOptional}</span>
+        </label>
+        <input
+          type="text"
+          value={cardText}
+          onChange={(e) => setCardText(e.target.value)}
+          placeholder={t.textOnCardPlaceholder}
+          maxLength={80}
+          disabled={loading}
+          className="mt-2 w-full rounded-2xl border border-tg-hint/20 bg-transparent p-3 text-sm outline-none placeholder:text-tg-hint/60 focus:border-tg-button disabled:opacity-50"
+        />
+
+        <p className="mt-3 text-xs font-semibold text-tg-hint">{t.textStylePresetsLabel}</p>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {textStylePresets.map((preset) => {
+            const [label] = preset;
+            const isSelected = textStyleHint?.[0] === label;
+            return (
+              <button
+                key={label}
+                type="button"
+                disabled={loading}
+                onClick={() => setTextStyleHint(isSelected ? null : preset)}
+                className={`rounded-full border px-3 py-1 text-xs transition disabled:opacity-50 ${
+                  isSelected
+                    ? 'border-transparent bg-gradient-to-r from-indigo-500 to-fuchsia-500 text-white'
+                    : 'border-white/10 bg-white/[0.05] text-tg-hint hover:text-tg-text'
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-xl backdrop-blur">
         <label className="text-sm font-semibold">{t.sizeLabel}</label>
         <div className="mt-2 flex gap-3">
           <div className="flex-1">
@@ -234,7 +297,7 @@ export default function UploadForm({ t, status, onUploaded, onStatusChange }) {
 
       <button
         onClick={handleSubmit}
-        disabled={!file || loading || limitReached}
+        disabled={!hasAnyInput || loading || limitReached}
         className="w-full rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 px-4 py-3.5 font-semibold text-white shadow-lg shadow-purple-500/20 transition active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100"
       >
         {loading ? `${stepLabel} ${progressPercent}%` : t.submitIdle}
