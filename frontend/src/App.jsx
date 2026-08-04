@@ -152,6 +152,16 @@ export default function App() {
                       setPaymentOrigin(STEPS.PREVIEW);
                       setStep(STEPS.PREVIEW);
                     }}
+                    onRequiresPayment={(id) => {
+                      // Лимит бесплатных генераций исчерпан — карточек ещё нет,
+                      // сразу ведём на оплату (генерация начнётся после неё).
+                      setOrderId(id);
+                      setPreviewUrls([]);
+                      setProductCopy(null);
+                      setHasProductCopy(false);
+                      setPaymentOrigin(STEPS.UPLOAD);
+                      setStep(STEPS.PAYMENT);
+                    }}
                   />
                 </div>
               )}

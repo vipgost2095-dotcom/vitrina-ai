@@ -46,7 +46,7 @@ export const STRINGS = {
     referralLinkCopied: 'Ссылка скопирована',
 
     freeGenerationsRemaining: (n, limit) => `Бесплатных генераций осталось: ${n} из ${limit}`,
-    freeGenerationsLimitReached: 'Бесплатный лимит генераций исчерпан навсегда. Новые карточки создать нельзя, но можно оплатить и скачать без водяного знака любую из уже сделанных ранее — см. «История». Приглашайте друзей, чтобы получить скидку до 10% на оплату.',
+    freeGenerationsLimitReached: 'Бесплатный лимит из 3 генераций исчерпан. Дальше — платно, как обычно: нажмите «Создать карточки», оплатите, и карточки сгенерируются сразу после оплаты. Приглашайте друзей, чтобы получить скидку до 10% на оплату.',
 
     submitLoading: 'Генерируем карточки…',
     submitIdle: 'Создать карточки',
@@ -86,6 +86,7 @@ export const STRINGS = {
 
     paidTitle: 'Оплата подтверждена',
     paidSubtitle: 'Карточки уже отправлены вам в чат с ботом. Также можно скачать их здесь:',
+    paidGeneratingNote: 'Оплата получена, генерируем карточки — обычно занимает меньше минуты. Можно закрыть приложение, карточки придут в чат с ботом.',
     downloadOne: (label) => `Скачать: ${label}`,
     downloadZip: 'Скачать все карточки (zip)',
     downloadText: 'Скачать текст карточки (txt)',
@@ -170,7 +171,7 @@ export const STRINGS = {
     referralLinkCopied: 'Link copied',
 
     freeGenerationsRemaining: (n, limit) => `Free generations left: ${n} of ${limit}`,
-    freeGenerationsLimitReached: 'Your free generation limit is used up for good. You can no longer create new cards, but you can still pay to download any of your previous ones without a watermark — see History. Invite friends to get up to 10% off.',
+    freeGenerationsLimitReached: 'Your free limit of 3 generations is used up. From now on it\'s paid, as usual: tap "Create cards", pay, and the cards will be generated right after payment. Invite friends to get up to 10% off.',
 
     submitLoading: 'Generating cards…',
     submitIdle: 'Create cards',
@@ -210,6 +211,7 @@ export const STRINGS = {
 
     paidTitle: 'Payment confirmed',
     paidSubtitle: 'All cards have already been sent to you in the bot chat. You can also download them here:',
+    paidGeneratingNote: 'Payment received, generating your cards — usually under a minute. You can close the app, cards will arrive in the bot chat.',
     downloadOne: (label) => `Download: ${label}`,
     downloadZip: 'Download all cards (zip)',
     downloadText: 'Download card text (txt)',
