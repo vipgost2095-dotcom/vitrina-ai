@@ -541,12 +541,12 @@ export async function applyWatermarkToVariants(variants, orderId) {
     // друг с другом). См. buildWatermarkTiles ниже — именно плотность
     // перекрытия, а не голый размер буквы, определяет, останется ли на
     // карточке хоть один чистый участок для скриншота.
-    const fontSize = Math.max(28, Math.round(Math.min(variant.width, variant.height) * 0.45));
+    const fontSize = Math.max(28, Math.round(Math.min(variant.width, variant.height) * 0.9));
 
     const watermarkSvg = Buffer.from(`
       <svg width="${variant.width}" height="${variant.height}" xmlns="http://www.w3.org/2000/svg">
         <style>
-          .wm { fill: rgba(255,255,255,0.6); font-size: ${fontSize}px; font-family: sans-serif; font-weight: 700; }
+          .wm { fill: rgba(255,0,0,0.6); font-size: ${fontSize}px; font-family: sans-serif; font-weight: 700; }
         </style>
         ${buildWatermarkTiles(variant.width, variant.height, fontSize)}
       </svg>
