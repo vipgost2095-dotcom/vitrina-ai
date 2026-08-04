@@ -11,6 +11,7 @@ import paymentRoutes from './routes/payment.js';
 import downloadRoutes from './routes/download.js';
 import internalRoutes from './routes/internal.js';
 import userRoutes from './routes/user.js';
+import historyRoutes from './routes/history.js';
 
 const app = express();
 
@@ -33,6 +34,7 @@ app.use('/api', downloadRoutes);
 app.use('/api', requireTelegramAuth, uploadRoutes);
 app.use('/api', requireTelegramAuth, paymentRoutes);
 app.use('/api', requireTelegramAuth, userRoutes);
+app.use('/api', requireTelegramAuth, historyRoutes);
 
 // Server-to-server вызовы от бота (подтверждение оплаты Stars) — своя защита секретом
 app.use('/api', internalRoutes);

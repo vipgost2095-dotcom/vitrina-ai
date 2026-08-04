@@ -132,6 +132,20 @@ export function countPaidOrders(telegramId) {
   return row.cnt;
 }
 
+// История генераций пользователя — только осмысленные статусы (пропускаем
+// 'created'/'generating', пока ещё нечего показывать, и зависшие 'error').
+// Самые новые — первыми.
+export function getOrdersByUser(telegramId, limit = 20) {
+  return db.prepare(`
+    SELECT id, status, payment_method, amount_ton, usdt_amount, stars_amount,
+           discount_percent, watermarked_paths_json, product_copy_json, created_at
+    FROM orders
+    WHERE telegram_id = ? AND status IN ('generated', 'awaiting_payment', 'paid')
+    ORDER BY created_at DESC
+    LIMIT ?
+  `).all(String(telegramId), limit);
+}
+
 export function createOrder({ id, telegramId, originalPath }) {
   db.prepare(`
     INSERT INTO orders (id, telegram_id, status, original_path)
