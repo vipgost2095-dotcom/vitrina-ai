@@ -104,16 +104,44 @@ const PRODUCT_INTEGRITY_INSTRUCTION =
  * факту готовности), чтобы вызывающий код (routes/upload.js) мог сохранять
  * прогресс в БД и отдавать его фронтенду через опрос статуса.
  */
+/**
+ * Основная функция: принимает путь к загруженному фото (может быть null —
+ * тогда карточка рисуется ЦЕЛИКОМ по текстовому описанию, без исходного
+ * фото товара), (необязательное) текстовое описание от пользователя и
+ * желаемый размер карточки — возвращает массив из 3 путей к сгенерированным
+ * карточкам (без водяного знака), каждая в своём стиле.
+ *
+ * onProgress(percent, step) — необязательный колбэк, вызывается после
+ * КАЖДОГО реально завершившегося шага (не имитация — честные отметки по
+ * факту готовности), чтобы вызывающий код (routes/upload.js) мог сохранять
+ * прогресс в БД и отдавать его фронтенду через опрос статуса.
+ */
 export async function generateCardVariants(originalPath, orderId, userDescription, width, height, onProgress) {
   const w = normalizeSize(width);
   const h = normalizeSize(height);
   const provider = process.env.AI_BACKGROUND_PROVIDER || 'stub';
 
   const results = [];
-  // Доли общего прогресса: подготовка (вырезание фона) — 10%, дальше по
-  // ~27% на каждый из 3 вариантов = 91%, округляем последний до 90%.
+  // Доли общего прогресса: подготовка — 10%, дальше по ~27% на каждый из
+  // 3 вариантов = 91%, округляем последний до 90%.
   const PREP_PERCENT = 10;
   const PER_VARIANT_PERCENT = Math.floor((90 - PREP_PERCENT) / STYLE_VARIATIONS.length);
+
+  if (!originalPath) {
+    // Фото не загружали — рисуем карточку целиком по описанию пользователя
+    // (text-to-image, без исходного фото товара для редактирования).
+    onProgress?.(PREP_PERCENT, 'prepare');
+    for (let i = 0; i < STYLE_VARIATIONS.length; i++) {
+      const style = STYLE_VARIATIONS[i];
+      const aiImageBuffer = await tryGenerateTextToImage(userDescription, style.styleHint, w, h);
+      const finalPath = aiImageBuffer
+        ? await renderCardFromAiPhoto(aiImageBuffer, style.name, w, h, orderId)
+        : await renderGradientOnlyCard(style, w, h, orderId);
+      results.push({ style: style.name, label: style.name, width: w, height: h, path: finalPath });
+      onProgress?.(PREP_PERCENT + (i + 1) * PER_VARIANT_PERCENT, style.name);
+    }
+    return results;
+  }
 
   if (provider === 'openai_full') {
     // Режим "всё в одном": каждый вызов идёт прямо на исходное фото — модель
@@ -147,6 +175,90 @@ export async function generateCardVariants(originalPath, orderId, userDescriptio
   }
 
   return results;
+}
+
+// ---------------------------------------------------------------------------
+// Генерация БЕЗ исходного фото — карточка целиком по текстовому описанию
+// (OpenAI Images API, endpoint /v1/images/generations — в отличие от
+// /v1/images/edits, тут нет входного изображения вообще, только текст).
+// ---------------------------------------------------------------------------
+
+async function tryGenerateTextToImage(userDescription, styleHint, width, height) {
+  const provider = process.env.AI_BACKGROUND_PROVIDER || 'stub';
+  if (provider !== 'openai' && provider !== 'openai_full') return null;
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    console.warn('Фото не загружено и AI_BACKGROUND_PROVIDER=openai(_full), но OPENAI_API_KEY не задан — использую запасной вариант с градиентом');
+    return null;
+  }
+
+  if (!(userDescription || '').trim()) {
+    // Без фото и без описания рисовать вообще нечего — этот случай должен
+    // отсекаться ещё в routes/upload.js, но на всякий случай подстрахуемся.
+    console.warn('Нет ни фото, ни описания — нечего генерировать, использую запасной вариант с градиентом');
+    return null;
+  }
+
+  try {
+    return await generateTextToImageViaOpenAi(userDescription, styleHint, width, height);
+  } catch (err) {
+    console.error('Ошибка text-to-image генерации (OpenAI), использую запасной вариант с градиентом:', err);
+    return null;
+  }
+}
+
+async function generateTextToImageViaOpenAi(userDescription, styleHint, width, height) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
+  // Без исходного товара защищать нечего (requireProductIntegrity не нужен) —
+  // это уже не редактирование фото, а генерация "с нуля" по описанию.
+  const prompt = buildPrompt(userDescription, 'AI_BACKGROUND_PROMPT', styleHint);
+  const { size, quality } = buildImageRequestParams(model, width, height);
+
+  const response = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, prompt, size, ...(quality ? { quality } : {}), n: 1 }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw new Error(`OpenAI images/generations вернул ошибку ${response.status}: ${errText}`);
+  }
+
+  const data = await response.json();
+  const item = data?.data?.[0];
+  if (item?.b64_json) return Buffer.from(item.b64_json, 'base64');
+  if (item?.url) {
+    const imgResponse = await fetch(item.url);
+    return Buffer.from(await imgResponse.arrayBuffer());
+  }
+  throw new Error('OpenAI не вернул изображение в ответе');
+}
+
+/**
+ * Запасной вариант без ИИ и без фото товара — просто цветная градиентная
+ * карточка (без исходного фото, оверлеить нечего). Работает всегда, даже
+ * без единого внешнего API-ключа — так приложение остаётся рабочим "из
+ * коробки" даже для сценария "карточка без фото".
+ */
+async function renderGradientOnlyCard(style, width, height, orderId) {
+  const backgroundSvg = Buffer.from(`
+    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="${style.gradientFrom}"/>
+          <stop offset="100%" stop-color="${style.gradientTo}"/>
+        </linearGradient>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#bg)"/>
+    </svg>
+  `);
+
+  const finalPath = path.join(GENERATED_DIR, `${orderId}_${style.name}_final.png`);
+  await sharp(backgroundSvg).png().toFile(finalPath);
+  return finalPath;
 }
 
 // ---------------------------------------------------------------------------
@@ -196,11 +308,6 @@ async function tryGenerateAiPhoto(cutoutBuffer, userDescription, styleHint, widt
   }
 }
 
-/**
- * Собирает финальный промпт: описание пользователя (если есть) как есть +
- * стилевое направление этого конкретного варианта + технические требования.
- * Если пользователь ничего не написал — базой становится сам styleHint.
- */
 /**
  * Собирает финальный промпт: описание пользователя (если есть) как есть +
  * стилевое направление этого конкретного варианта + технические требования.
