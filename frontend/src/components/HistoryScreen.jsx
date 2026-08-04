@@ -35,7 +35,8 @@ export default function HistoryScreen({ t, onBack, onSelectOrder }) {
         {items?.map((item) => (
           <div
             key={item.orderId}
-            className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3"
+            onClick={() => onSelectOrder(item.orderId, item.hasProductCopy)}
+            className="flex cursor-pointer items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3 transition hover:bg-white/[0.06]"
           >
             {item.previewUrl ? (
               <img

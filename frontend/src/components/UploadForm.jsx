@@ -19,7 +19,7 @@ const STEP_LABEL_KEYS = {
   done: 'progressStepDone',
 };
 
-export default function UploadForm({ t, status, onUploaded, onStatusChange }) {
+export default function UploadForm({ t, status, onUploaded, onStatusChange, onRequiresPayment }) {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   // Одно общее поле: и фон/стиль, и желаемый текст на карточке (со шрифтом/
@@ -96,14 +96,22 @@ export default function UploadForm({ t, status, onUploaded, onStatusChange }) {
   }
 
   async function handleSubmit() {
-    if (!hasAnyInput || limitReached) return;
+    if (!hasAnyInput) return;
     setLoading(true);
     setError(null);
     setProgressPercent(0);
     setProgressStep('queued');
     try {
-      const { orderId } = await startUpload(file, description.trim(), clampSize(width), clampSize(height));
-      pollGenerationStatus(orderId);
+      const result = await startUpload(file, description.trim(), clampSize(width), clampSize(height));
+      if (result.requiresPayment) {
+        // Бесплатный лимит исчерпан — карточки сгенерируются СРАЗУ ПОСЛЕ
+        // оплаты (см. PaymentScreen), а не наоборот. Опрос прогресса
+        // генерации в этом случае не нужен — сразу переходим к оплате.
+        setLoading(false);
+        onRequiresPayment?.(result.orderId);
+        return;
+      }
+      pollGenerationStatus(result.orderId);
     } catch (err) {
       hapticError();
       setError(err.message);
@@ -239,7 +247,7 @@ export default function UploadForm({ t, status, onUploaded, onStatusChange }) {
 
       <button
         onClick={handleSubmit}
-        disabled={!hasAnyInput || loading || limitReached}
+        disabled={!hasAnyInput || loading}
         className="w-full rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 px-4 py-3.5 font-semibold text-white shadow-lg shadow-purple-500/20 transition active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100"
       >
         {loading ? `${stepLabel} ${progressPercent}%` : t.submitIdle}
