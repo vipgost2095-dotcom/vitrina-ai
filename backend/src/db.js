@@ -65,6 +65,11 @@ const orderMigrations = [
   // generated -> ... Обновляются по ходу генерации (см. routes/upload.js).
   ['generation_progress', "ALTER TABLE orders ADD COLUMN generation_progress INTEGER DEFAULT 0"],
   ['generation_step', "ALTER TABLE orders ADD COLUMN generation_step TEXT"],
+  // lifecycle_processed — защита от повторного выполнения "последствий оплаты"
+  // (сброс лимита бесплатных генераций, реферальный бонус): GET /payment/status
+  // вызывается при КАЖДОМ опросе, и без этого флага для уже оплаченного заказа
+  // эти действия выполнялись бы повторно на каждый опрос, а не один раз.
+  ['lifecycle_processed', "ALTER TABLE orders ADD COLUMN lifecycle_processed INTEGER DEFAULT 0"],
 ];
 for (const [column, sql] of orderMigrations) {
   if (!existingOrderColumns.has(column)) db.exec(sql);
@@ -178,6 +183,14 @@ export function getOrderVariants(order) {
 // если статус-эндпоинт дёрнут почти одновременно несколько раз подряд).
 export function markDeliveredOnce(id) {
   const result = db.prepare(`UPDATE orders SET delivered = 1 WHERE id = ? AND delivered = 0`).run(id);
+  return result.changes === 1;
+}
+
+// Аналогичная атомарная защита, но для остальных "последствий оплаты"
+// (сброс лимита генераций, реферальный бонус) — они не должны повторяться
+// при каждом опросе статуса уже оплаченного заказа.
+export function markLifecycleProcessedOnce(id) {
+  const result = db.prepare(`UPDATE orders SET lifecycle_processed = 1 WHERE id = ? AND lifecycle_processed = 0`).run(id);
   return result.changes === 1;
 }
 
