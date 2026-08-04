@@ -76,8 +76,13 @@ async function runGenerationInBackground(orderId, telegramId, originalPath, desc
 router.post('/upload', upload.single('photo'), async (req, res) => {
   try {
     const telegramUser = req.telegramUser;
-    if (!req.file) {
-      return res.status(400).json({ error: 'Фото не передано (поле photo)' });
+
+    const description = typeof req.body.description === 'string' ? req.body.description.slice(0, 500) : '';
+
+    // Фото теперь НЕОБЯЗАТЕЛЬНО — можно сгенерировать карточку целиком по
+    // текстовому описанию. Но нужно хоть что-то одно: фото ИЛИ описание.
+    if (!req.file && !description.trim()) {
+      return res.status(400).json({ error: 'Нужно либо загрузить фото, либо хотя бы описать словами, что нарисовать' });
     }
 
     const telegramId = String(telegramUser.id);
@@ -96,19 +101,19 @@ router.post('/upload', upload.single('photo'), async (req, res) => {
       });
     }
 
-    const description = typeof req.body.description === 'string' ? req.body.description.slice(0, 500) : '';
     const width = normalizeSize(req.body.width);
     const height = normalizeSize(req.body.height);
+    const originalPath = req.file ? req.file.path : null;
 
     const orderId = uuidv4();
-    createOrder({ id: orderId, telegramId, originalPath: req.file.path });
+    createOrder({ id: orderId, telegramId, originalPath });
     updateOrder(orderId, { status: 'generating', generation_progress: 0, generation_step: 'queued' });
 
     // Отвечаем СРАЗУ — не дожидаясь генерации. Сам процесс продолжается
     // асинхронно в фоне (промис не await'ится специально).
     res.json({ orderId });
 
-    runGenerationInBackground(orderId, telegramId, req.file.path, description, width, height);
+    runGenerationInBackground(orderId, telegramId, originalPath, description, width, height);
   } catch (err) {
     console.error('Ошибка при запуске обработки фото:', err);
     res.status(500).json({ error: 'Не удалось обработать фото', details: String(err.message || err) });
