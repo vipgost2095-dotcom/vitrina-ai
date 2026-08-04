@@ -1,5 +1,6 @@
 // db.js — работа с SQLite через better-sqlite3.
-// Хранит пользователей (по их Telegram id и TON-адресу) и заказы (order = один процесс
+// Хранит пользователей (Telegram-аккаунт, TON-кошелёк, лимит бесплатных
+// генераций, реферальная программа) и заказы (order = один процесс
 // "загрузил фото -> сгенерировал карточку -> оплатил -> скачал").
 
 import Database from 'better-sqlite3';
@@ -40,28 +41,45 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 `);
 
-// Простая миграция для баз, созданных до появления оплаты Stars/USDT —
+// Простая миграция для баз, созданных до появления оплаты Stars/USDT/лимитов —
 // добавляем недостающие колонки, если их ещё нет (better-sqlite3 не умеет
 // "ADD COLUMN IF NOT EXISTS", поэтому проверяем вручную через pragma).
-const existingColumns = new Set(db.prepare('PRAGMA table_info(orders)').all().map((c) => c.name));
-const migrations = [
+const existingOrderColumns = new Set(db.prepare('PRAGMA table_info(orders)').all().map((c) => c.name));
+const orderMigrations = [
   ['payment_method', "ALTER TABLE orders ADD COLUMN payment_method TEXT"],
   ['stars_amount', "ALTER TABLE orders ADD COLUMN stars_amount INTEGER"],
   ['usdt_amount', "ALTER TABLE orders ADD COLUMN usdt_amount REAL"],
   ['telegram_payment_charge_id', "ALTER TABLE orders ADD COLUMN telegram_payment_charge_id TEXT"],
-  // final_paths_json / watermarked_paths_json хранят JSON-массив из 4 объектов
-  // { style, path } — по одному на каждый из 4 сгенерированных дизайнов карточки.
   ['final_paths_json', "ALTER TABLE orders ADD COLUMN final_paths_json TEXT"],
   ['watermarked_paths_json', "ALTER TABLE orders ADD COLUMN watermarked_paths_json TEXT"],
-  // delivered = 1, если бот уже отправил все 4 карточки пользователю в чат
-  // (нужно, чтобы не отправлять их повторно при каждом опросе статуса оплаты)
   ['delivered', "ALTER TABLE orders ADD COLUMN delivered INTEGER DEFAULT 0"],
-  // product_copy_json хранит {title, description, bullets} — текст карточки
-  // (название, продающее описание, буллеты характеристик), сгенерированный ИИ
   ['product_copy_json', "ALTER TABLE orders ADD COLUMN product_copy_json TEXT"],
+  // discount_percent — скидка (0-10%), применённая к ЭТОМУ заказу при создании
+  // платежа; храним именно тут, а не пересчитываем на лету, чтобы проверка
+  // оплаты в блокчейне всегда сверялась с той суммой, которую реально попросили
+  // заплатить, а не с "чистой" ценой без скидки.
+  ['discount_percent', "ALTER TABLE orders ADD COLUMN discount_percent INTEGER DEFAULT 0"],
 ];
-for (const [column, sql] of migrations) {
-  if (!existingColumns.has(column)) db.exec(sql);
+for (const [column, sql] of orderMigrations) {
+  if (!existingOrderColumns.has(column)) db.exec(sql);
+}
+
+const existingUserColumns = new Set(db.prepare('PRAGMA table_info(users)').all().map((c) => c.name));
+const userMigrations = [
+  // free_generations_used — счётчик бесплатных генераций с момента последней
+  // оплаты (или с регистрации). Сбрасывается в 0 при каждой успешной оплате.
+  ['free_generations_used', "ALTER TABLE users ADD COLUMN free_generations_used INTEGER DEFAULT 0"],
+  // referred_by — telegram_id того, кто пригласил этого пользователя (по
+  // реферальной ссылке t.me/bot?start=ref_<id>). Ставится один раз, при первом
+  // визите — COALESCE в setReferredBy не даёт переписать более позднему рефереру.
+  ['referred_by', "ALTER TABLE users ADD COLUMN referred_by TEXT"],
+  // referral_discount_percent — накопленная скидка (0-10%) за приглашённых
+  // друзей, которые сделали свою первую оплату. Применяется к СОБСТВЕННЫМ
+  // покупкам этого пользователя.
+  ['referral_discount_percent', "ALTER TABLE users ADD COLUMN referral_discount_percent INTEGER DEFAULT 0"],
+];
+for (const [column, sql] of userMigrations) {
+  if (!existingUserColumns.has(column)) db.exec(sql);
 }
 
 export function upsertUser({ telegramId, username, tonAddress }) {
@@ -72,6 +90,40 @@ export function upsertUser({ telegramId, username, tonAddress }) {
       username = excluded.username,
       ton_address = COALESCE(excluded.ton_address, users.ton_address)
   `).run({ telegramId, username: username || null, tonAddress: tonAddress || null });
+}
+
+export function getUser(telegramId) {
+  return db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(String(telegramId));
+}
+
+// Ставит referred_by только один раз (COALESCE не даёт перезаписать, если уже задано)
+export function setReferredBy(telegramId, referrerId) {
+  db.prepare(`UPDATE users SET referred_by = COALESCE(referred_by, ?) WHERE telegram_id = ?`)
+    .run(String(referrerId), String(telegramId));
+}
+
+export function incrementFreeGenerations(telegramId) {
+  db.prepare(`UPDATE users SET free_generations_used = free_generations_used + 1 WHERE telegram_id = ?`)
+    .run(String(telegramId));
+}
+
+export function resetFreeGenerations(telegramId) {
+  db.prepare(`UPDATE users SET free_generations_used = 0 WHERE telegram_id = ?`).run(String(telegramId));
+}
+
+// Увеличивает накопленную реферальную скидку, не превышая maxPercent
+export function incrementReferralDiscount(telegramId, bonusPercent, maxPercent) {
+  db.prepare(`
+    UPDATE users
+    SET referral_discount_percent = MIN(?, referral_discount_percent + ?)
+    WHERE telegram_id = ?
+  `).run(maxPercent, bonusPercent, String(telegramId));
+}
+
+export function countPaidOrders(telegramId) {
+  const row = db.prepare(`SELECT COUNT(*) as cnt FROM orders WHERE telegram_id = ? AND status = 'paid'`)
+    .get(String(telegramId));
+  return row.cnt;
 }
 
 export function createOrder({ id, telegramId, originalPath }) {

@@ -17,8 +17,13 @@ const STARS_AMOUNT = Number(process.env.STARS_PAYMENT_AMOUNT || '50');
  * currency = 'XTR' — это специальный код валюты для Telegram Stars,
  * provider_token для Stars должен быть пустой строкой.
  */
-export async function createStarsInvoiceLink(orderId) {
+export async function createStarsInvoiceLink(orderId, discountPercent = 0) {
   if (!BOT_TOKEN) throw new Error('BOT_TOKEN не задан в .env бэкенда');
+
+  const pct = Math.min(10, Math.max(0, Number(discountPercent) || 0));
+  // Stars — целое число, поэтому скидку округляем, но не даём уйти в 0
+  // (минимум 1 Star, чтобы инвойс вообще имел смысл)
+  const starsAmount = Math.max(1, Math.round(STARS_AMOUNT * (1 - pct / 100)));
 
   const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/createInvoiceLink`, {
     method: 'POST',
@@ -28,7 +33,7 @@ export async function createStarsInvoiceLink(orderId) {
       description: 'Скачивание готовой карточки товара в высоком качестве',
       payload: orderId, // вернётся в successful_payment.invoice_payload
       currency: 'XTR',
-      prices: [{ label: 'Карточка товара', amount: STARS_AMOUNT }],
+      prices: [{ label: 'Карточка товара', amount: starsAmount }],
     }),
   });
 
@@ -37,5 +42,5 @@ export async function createStarsInvoiceLink(orderId) {
     throw new Error(`Telegram Bot API вернул ошибку: ${data.description || 'неизвестная ошибка'}`);
   }
 
-  return { invoiceLink: data.result, starsAmount: STARS_AMOUNT };
+  return { invoiceLink: data.result, starsAmount, discountPercent: pct };
 }

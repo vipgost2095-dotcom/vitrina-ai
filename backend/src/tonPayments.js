@@ -1,8 +1,12 @@
 // tonPayments.js
-// 1) createPaymentRequest — формирует данные транзакции, которые фронтенд
-//    передаёт в TonConnect (tonConnectUI.sendTransaction).
-// 2) checkPaymentOnChain — опрашивает toncenter.com и ищет входящую транзакцию
-//    на PAYMENT_RECEIVER_ADDRESS с нужной суммой и комментарием (orderId).
+// 1) createPaymentRequest / createUsdtPaymentRequest — формируют данные
+//    транзакции, которые фронтенд передаёт в TonConnect. Учитывают
+//    реферальную скидку (0-10%), если она есть у пользователя.
+// 2) checkPaymentOnChain / checkUsdtPaymentOnChain — опрашивают toncenter.com
+//    и ищут входящую транзакцию с нужной суммой и комментарием (orderId).
+//    Ожидаемую сумму передаёт вызывающий код (routes/payment.js) — это ТА
+//    сумма, что была реально показана пользователю при создании платежа
+//    (с учётом скидки), а не «чистая» цена без скидки из .env.
 
 import fetch from 'node-fetch';
 import { Address, beginCell, Cell } from '@ton/core';
@@ -23,13 +27,20 @@ function toncenterHeaders() {
   return TONCENTER_API_KEY ? { 'X-API-Key': TONCENTER_API_KEY } : {};
 }
 
+function applyDiscount(amount, discountPercent) {
+  const pct = Math.min(10, Math.max(0, Number(discountPercent) || 0));
+  return amount * (1 - pct / 100);
+}
+
 /**
  * Формирует объект с данными для оплаты — его frontend напрямую передаст
  * в TonConnect UI (см. PaymentScreen.jsx). Комментарий = orderId, чтобы
  * потом однозначно найти эту транзакцию в истории кошелька.
  */
-export function createPaymentRequest(orderId) {
+export function createPaymentRequest(orderId, discountPercent = 0) {
   if (!RECEIVER) throw new Error('PAYMENT_RECEIVER_ADDRESS не задан в .env');
+
+  const amountTon = applyDiscount(AMOUNT_TON, discountPercent);
 
   return {
     // TonConnect ожидает адрес в raw-формате (workchain:hex) в поле
@@ -37,18 +48,21 @@ export function createPaymentRequest(orderId) {
     // случай, чтобы не зависеть от того, насколько лояльно конкретный
     // кошелёк относится к формату адреса.
     receiverAddress: Address.parse(RECEIVER).toRawString(),
-    amountTon: AMOUNT_TON,
-    amountNano: Math.round(AMOUNT_TON * 1e9).toString(),
+    amountTon,
+    amountNano: Math.round(amountTon * 1e9).toString(),
     comment: orderId, // будет закодирован во frontend через beginCell().storeUint(0,32).storeStringTail(comment)
     network: NETWORK,
+    discountPercent: Math.min(10, Math.max(0, Number(discountPercent) || 0)),
   };
 }
 
 /**
- * Проверяет по блокчейну, пришла ли на RECEIVER транзакция с суммой >= AMOUNT_TON
- * и текстовым комментарием, совпадающим с orderId. Возвращает tx hash или null.
+ * Проверяет по блокчейну, пришла ли на RECEIVER транзакция с суммой
+ * >= expectedAmountTon и текстовым комментарием, совпадающим с orderId.
+ * expectedAmountTon — сумма, которую реально попросили заплатить при
+ * создании платежа (уже с учётом скидки, если она была).
  */
-export async function checkPaymentOnChain(orderId) {
+export async function checkPaymentOnChain(orderId, expectedAmountTon) {
   const url = new URL(`${TONCENTER_BASE}/getTransactions`);
   url.searchParams.set('address', RECEIVER);
   url.searchParams.set('limit', '30');
@@ -65,13 +79,15 @@ export async function checkPaymentOnChain(orderId) {
   const data = await response.json();
   const transactions = data?.result || [];
 
+  const expected = Number(expectedAmountTon) || AMOUNT_TON;
+
   for (const tx of transactions) {
     const inMsg = tx.in_msg;
     if (!inMsg) continue;
 
     const comment = (inMsg.message || '').trim();
     const valueNano = Number(inMsg.value || 0);
-    const minNano = Math.round(AMOUNT_TON * 1e9 * 0.98); // небольшой допуск на комиссии/округление
+    const minNano = Math.round(expected * 1e9 * 0.98); // небольшой допуск на комиссии/округление
 
     if (comment === orderId && valueNano >= minNano) {
       return tx.transaction_id?.hash || tx.hash || 'unknown_hash';
@@ -114,49 +130,46 @@ export async function getJettonWalletAddress(ownerAddress) {
   const stackItem = data?.result?.stack?.[0];
   if (!stackItem) throw new Error('toncenter не вернул адрес jetton-кошелька');
 
-  // Формат ответа toncenter v2 для типа "cell"/"slice": { object: { bytes: '<base64 boc>' } } либо [type, {bytes}]
   const cellBytesB64 = stackItem[1]?.bytes || stackItem.object?.bytes;
   const resultCell = Cell.fromBoc(Buffer.from(cellBytesB64, 'base64'))[0];
   const jettonWalletAddress = resultCell.beginParse().loadAddress();
 
-  // Возвращаем в raw-формате (workchain:hex) — именно это поле фронтенд
-  // подставит напрямую в messages[].address для TonConnect.
   return jettonWalletAddress.toRawString();
 }
 
 /**
  * Формирует данные, нужные фронтенду для отправки USDT: адрес jetton-мастера,
- * сумма в минимальных единицах (с учётом decimals) и комментарий-orderId,
- * который будет вложен в forward_payload transfer-сообщения.
+ * сумма в минимальных единицах (с учётом decimals и скидки) и комментарий-orderId.
  */
-export function createUsdtPaymentRequest(orderId) {
+export function createUsdtPaymentRequest(orderId, discountPercent = 0) {
   if (!RECEIVER) throw new Error('PAYMENT_RECEIVER_ADDRESS не задан в .env');
   if (!USDT_JETTON_MASTER) throw new Error('USDT_JETTON_MASTER_ADDRESS не задан в .env');
 
-  const amountUnits = Math.round(USDT_AMOUNT * 10 ** USDT_DECIMALS).toString();
+  const amountUsdt = applyDiscount(USDT_AMOUNT, discountPercent);
+  const amountUnits = Math.round(amountUsdt * 10 ** USDT_DECIMALS).toString();
 
   return {
     jettonMasterAddress: USDT_JETTON_MASTER,
     receiverAddress: RECEIVER,
-    amountUsdt: USDT_AMOUNT,
+    amountUsdt,
     amountUnits,
     decimals: USDT_DECIMALS,
     comment: orderId,
     network: NETWORK,
+    discountPercent: Math.min(10, Math.max(0, Number(discountPercent) || 0)),
   };
 }
 
 /**
  * Проверяет по блокчейну входящий jetton-перевод USDT на кошелёк администратора.
- * Технически это internal-сообщение с op = 0x7362d09c (transfer_notification,
- * TEP-74), которое администраторский jetton-кошелёк присылает на основной
- * TON-кошелёк админа (RECEIVER). Разбираем тело сообщения вручную.
+ * expectedAmountUsdt — сумма (с учётом скидки), которую реально попросили
+ * заплатить при создании платежа.
  *
  * ВАЖНО: перед продакшеном обязательно проверьте разбор на реальных
  * транзакциях в тестовой сети — форматы forward_payload у разных кошельков
  * (Tonkeeper/@wallet/MyTonWallet) могут заворачивать комментарий чуть по-разному.
  */
-export async function checkUsdtPaymentOnChain(orderId) {
+export async function checkUsdtPaymentOnChain(orderId, expectedAmountUsdt) {
   const url = new URL(`${TONCENTER_BASE}/getTransactions`);
   url.searchParams.set('address', RECEIVER);
   url.searchParams.set('limit', '30');
@@ -167,7 +180,8 @@ export async function checkUsdtPaymentOnChain(orderId) {
   const data = await response.json();
   const transactions = data?.result || [];
 
-  const minUnits = BigInt(Math.round(USDT_AMOUNT * 10 ** USDT_DECIMALS * 0.98));
+  const expected = Number(expectedAmountUsdt) || USDT_AMOUNT;
+  const minUnits = BigInt(Math.round(expected * 10 ** USDT_DECIMALS * 0.98));
 
   for (const tx of transactions) {
     const inMsg = tx.in_msg;
@@ -186,7 +200,6 @@ export async function checkUsdtPaymentOnChain(orderId) {
       const jettonAmount = slice.loadCoins();
       slice.loadAddress(); // адрес отправителя (sender) — можно логировать при желании
 
-      // forward_payload может лежать прямо в слайсе или в отдельной ref-ячейке
       const hasForwardPayload = slice.remainingBits > 0 || slice.remainingRefs > 0;
       let comment = '';
       if (hasForwardPayload) {
@@ -203,8 +216,6 @@ export async function checkUsdtPaymentOnChain(orderId) {
         return tx.transaction_id?.hash || tx.hash || 'unknown_hash';
       }
     } catch (err) {
-      // Не удалось разобрать конкретное сообщение — пропускаем, это может быть
-      // просто другая транзакция (например, обычный TON-перевод или газ)
       continue;
     }
   }
