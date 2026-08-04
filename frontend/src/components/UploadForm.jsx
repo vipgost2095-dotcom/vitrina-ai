@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { startUpload, getGenerationStatus } from '../api.js';
 import { hapticError, hapticSuccess } from '../telegram.js';
+import { PALETTES, MOODS, TEXTURES, getTotalCombinations, composeStylePhrase, randomCombination } from '../styleLibrary.js';
 
 const DEFAULT_SIZE = { width: 1000, height: 1000 };
 const MIN_SIZE = 200;
@@ -19,13 +20,19 @@ const STEP_LABEL_KEYS = {
   done: 'progressStepDone',
 };
 
-export default function UploadForm({ t, status, onUploaded, onStatusChange, onRequiresPayment }) {
+export default function UploadForm({ t, lang, status, onUploaded, onStatusChange, onRequiresPayment }) {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   // Одно общее поле: и фон/стиль, и желаемый текст на карточке (со шрифтом/
   // стилем надписи, если хочется) пользователь описывает вместе, своими
   // словами — отдельного поля для текста больше нет.
   const [description, setDescription] = useState('');
+  // Расширенный конструктор стиля: 10 палитр × 10 настроений × 5 текстур =
+  // 500 комбинаций (см. styleLibrary.js), выбираемых за 1-3 тапа — каждый
+  // выбор пересобирает description целиком.
+  const [selectedPalette, setSelectedPalette] = useState(null);
+  const [selectedMood, setSelectedMood] = useState(null);
+  const [selectedTexture, setSelectedTexture] = useState(null);
   const [width, setWidth] = useState(DEFAULT_SIZE.width);
   const [height, setHeight] = useState(DEFAULT_SIZE.height);
   const [loading, setLoading] = useState(false);
@@ -35,6 +42,35 @@ export default function UploadForm({ t, status, onUploaded, onStatusChange, onRe
   const pollTimer = useRef(null);
 
   useEffect(() => () => clearInterval(pollTimer.current), []);
+
+  const labelIndex = lang === 'en' ? 1 : 0;
+
+  function applyStyleSelection(palette, mood, texture) {
+    setSelectedPalette(palette);
+    setSelectedMood(mood);
+    setSelectedTexture(texture);
+    setDescription(composeStylePhrase(palette, mood, texture));
+  }
+
+  function handlePaletteClick(item) {
+    const next = selectedPalette?.[labelIndex] === item[labelIndex] ? null : item;
+    applyStyleSelection(next, selectedMood, selectedTexture);
+  }
+
+  function handleMoodClick(item) {
+    const next = selectedMood?.[labelIndex] === item[labelIndex] ? null : item;
+    applyStyleSelection(selectedPalette, next, selectedTexture);
+  }
+
+  function handleTextureClick(item) {
+    const next = selectedTexture?.[labelIndex] === item[labelIndex] ? null : item;
+    applyStyleSelection(selectedPalette, selectedMood, next);
+  }
+
+  function handleRandomStyle() {
+    const combo = randomCombination();
+    applyStyleSelection(combo.palette, combo.mood, combo.texture);
+  }
 
   const stylePresets = [
     [t.stylePresetMinimal, t.stylePresetMinimalText],
@@ -190,6 +226,89 @@ export default function UploadForm({ t, status, onUploaded, onStatusChange, onRe
               {label}
             </button>
           ))}
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-xl backdrop-blur">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <label className="text-sm font-semibold">{t.extendedStyleLabel(getTotalCombinations())}</label>
+            <p className="mt-0.5 text-xs text-tg-hint">{t.extendedStyleSubtitle}</p>
+          </div>
+          <button
+            type="button"
+            disabled={loading}
+            onClick={handleRandomStyle}
+            className="shrink-0 rounded-full bg-gradient-to-r from-indigo-500 to-fuchsia-500 px-3 py-1.5 text-xs font-semibold text-white shadow-md disabled:opacity-50"
+          >
+            {t.randomStyleButton}
+          </button>
+        </div>
+
+        <p className="mt-3 text-xs font-semibold text-tg-hint">{t.paletteLabel}</p>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {PALETTES.map((item) => {
+            const isSelected = selectedPalette?.[labelIndex] === item[labelIndex];
+            return (
+              <button
+                key={item[0]}
+                type="button"
+                disabled={loading}
+                onClick={() => handlePaletteClick(item)}
+                className={`rounded-full border px-3 py-1 text-xs transition disabled:opacity-50 ${
+                  isSelected
+                    ? 'border-transparent bg-gradient-to-r from-indigo-500 to-fuchsia-500 text-white'
+                    : 'border-white/10 bg-white/[0.05] text-tg-hint hover:text-tg-text'
+                }`}
+              >
+                {item[labelIndex]}
+              </button>
+            );
+          })}
+        </div>
+
+        <p className="mt-3 text-xs font-semibold text-tg-hint">{t.moodLabel}</p>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {MOODS.map((item) => {
+            const isSelected = selectedMood?.[labelIndex] === item[labelIndex];
+            return (
+              <button
+                key={item[0]}
+                type="button"
+                disabled={loading}
+                onClick={() => handleMoodClick(item)}
+                className={`rounded-full border px-3 py-1 text-xs transition disabled:opacity-50 ${
+                  isSelected
+                    ? 'border-transparent bg-gradient-to-r from-indigo-500 to-fuchsia-500 text-white'
+                    : 'border-white/10 bg-white/[0.05] text-tg-hint hover:text-tg-text'
+                }`}
+              >
+                {item[labelIndex]}
+              </button>
+            );
+          })}
+        </div>
+
+        <p className="mt-3 text-xs font-semibold text-tg-hint">{t.textureLabel}</p>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {TEXTURES.map((item) => {
+            const isSelected = selectedTexture?.[labelIndex] === item[labelIndex];
+            return (
+              <button
+                key={item[0]}
+                type="button"
+                disabled={loading}
+                onClick={() => handleTextureClick(item)}
+                className={`rounded-full border px-3 py-1 text-xs transition disabled:opacity-50 ${
+                  isSelected
+                    ? 'border-transparent bg-gradient-to-r from-indigo-500 to-fuchsia-500 text-white'
+                    : 'border-white/10 bg-white/[0.05] text-tg-hint hover:text-tg-text'
+                }`}
+              >
+                {item[labelIndex]}
+              </button>
+            );
+          })}
         </div>
       </div>
 
