@@ -1,19 +1,19 @@
-// routes/upload.js — приём фото, (необязательного) текстового описания
-// желаемого фона/стиля и размера карточки, заданного пользователем.
-// Генерация 3 карточек в реально разных стилях + превью с водяным знаком,
-// плюс (опционально) ИИ-текст карточки: название/описание/буллеты по фото.
-//
-// Ограничение: FREE_GENERATIONS_LIMIT (по умолчанию 3) бесплатных генераций
-// на пользователя — после этого нужно оплатить хотя бы один заказ, чтобы
-// счётчик обнулился и снова стало можно генерировать (см. onOrderPaid в
-// orderLifecycle.js, где происходит сброс).
+// routes/upload.js — приём фото запускает генерацию карточек В ФОНЕ и сразу
+// отвечает orderId (не дожидаясь готовности) — сама генерация занимает
+// заметное время (особенно с 3 отдельными вызовами ИИ), поэтому:
+// 1) POST /upload — быстро сохраняет фото, запускает фоновую генерацию,
+//    сразу отвечает { orderId }.
+// 2) GET /upload/status/:orderId — фронтенд опрашивает этот эндпоинт, чтобы
+//    получить РЕАЛЬНЫЙ процент готовности (не имитацию) — см. onProgress
+//    в photoProcessing.js, который обновляет generation_progress в БД по
+//    факту завершения каждого шага.
 
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
 import { v4 as uuidv4 } from 'uuid';
-import { createOrder, updateOrder, upsertUser, getUser, incrementFreeGenerations } from '../db.js';
+import { createOrder, updateOrder, getOrder, upsertUser, getUser, incrementFreeGenerations } from '../db.js';
 import { generateCardVariants, applyWatermarkToVariants, normalizeSize } from '../photoProcessing.js';
 import { tryGenerateProductCopy } from '../aiCopywriting.js';
 import { FREE_GENERATIONS_LIMIT } from './user.js';
@@ -42,6 +42,37 @@ const upload = multer({
   },
 });
 
+// Сама тяжёлая работа — выполняется ПОСЛЕ того, как ответ на POST /upload
+// уже ушёл фронтенду, поэтому её ошибки нужно ловить и записывать в заказ,
+// а не прокидывать наружу (отвечать в HTTP-ответ уже некому).
+async function runGenerationInBackground(orderId, telegramId, originalPath, description, width, height) {
+  try {
+    const finalVariants = await generateCardVariants(originalPath, orderId, description, width, height, (percent, step) => {
+      updateOrder(orderId, { generation_progress: percent, generation_step: step });
+    });
+
+    updateOrder(orderId, { generation_progress: 92, generation_step: 'watermarking' });
+    const watermarkedVariants = await applyWatermarkToVariants(finalVariants, orderId);
+
+    updateOrder(orderId, { generation_progress: 96, generation_step: 'copywriting' });
+    const productCopy = await tryGenerateProductCopy({ imagePath: originalPath, userDescription: description });
+
+    updateOrder(orderId, {
+      status: 'generated',
+      generation_progress: 100,
+      generation_step: 'done',
+      final_paths_json: JSON.stringify(finalVariants),
+      watermarked_paths_json: JSON.stringify(watermarkedVariants),
+      product_copy_json: productCopy ? JSON.stringify(productCopy) : null,
+    });
+
+    incrementFreeGenerations(telegramId);
+  } catch (err) {
+    console.error(`Ошибка фоновой генерации для заказа ${orderId}:`, err);
+    updateOrder(orderId, { status: 'error', generation_step: 'error' });
+  }
+}
+
 router.post('/upload', upload.single('photo'), async (req, res) => {
   try {
     const telegramUser = req.telegramUser;
@@ -52,9 +83,8 @@ router.post('/upload', upload.single('photo'), async (req, res) => {
     const telegramId = String(telegramUser.id);
     upsertUser({ telegramId, username: telegramUser.username });
 
-    // Лимит бесплатных генераций: если исчерпан — не тратим деньги на ИИ,
-    // сразу отвечаем ошибкой с понятным кодом, фронтенд покажет объяснение
-    // и предложит оплатить один из предыдущих заказов.
+    // Лимит бесплатных генераций проверяем СРАЗУ, синхронно — чтобы не
+    // запускать (и не тратить на ИИ) фоновую генерацию, если лимит исчерпан.
     const user = getUser(telegramId);
     const freeGenerationsUsed = user?.free_generations_used || 0;
     if (freeGenerationsUsed >= FREE_GENERATIONS_LIMIT) {
@@ -66,47 +96,54 @@ router.post('/upload', upload.single('photo'), async (req, res) => {
       });
     }
 
-    // Текстовое описание желаемого фона/стиля — необязательное поле формы.
     const description = typeof req.body.description === 'string' ? req.body.description.slice(0, 500) : '';
-
-    // Размер карточки задаёт сам пользователь.
     const width = normalizeSize(req.body.width);
     const height = normalizeSize(req.body.height);
 
     const orderId = uuidv4();
     createOrder({ id: orderId, telegramId, originalPath: req.file.path });
+    updateOrder(orderId, { status: 'generating', generation_progress: 0, generation_step: 'queued' });
 
-    // Генерируем карточки (без вотемарки) — они понадобятся после оплаты
-    const finalVariants = await generateCardVariants(req.file.path, orderId, description, width, height);
-    // И версии с водяным знаком — именно их видит пользователь на превью
-    const watermarkedVariants = await applyWatermarkToVariants(finalVariants, orderId);
+    // Отвечаем СРАЗУ — не дожидаясь генерации. Сам процесс продолжается
+    // асинхронно в фоне (промис не await'ится специально).
+    res.json({ orderId });
 
-    // Необязательный бонус — если не настроен/не удался, просто не покажем блок с текстом
-    const productCopy = await tryGenerateProductCopy({ imagePath: req.file.path, userDescription: description });
-
-    updateOrder(orderId, {
-      status: 'generated',
-      final_paths_json: JSON.stringify(finalVariants),
-      watermarked_paths_json: JSON.stringify(watermarkedVariants),
-      product_copy_json: productCopy ? JSON.stringify(productCopy) : null,
-    });
-
-    // Генерация реально состоялась — засчитываем её в лимит
-    incrementFreeGenerations(telegramId);
-
-    res.json({
-      orderId,
-      previewUrls: watermarkedVariants.map((v, index) => `/api/preview/${orderId}/${index}`),
-      styles: watermarkedVariants.map((v) => v.style),
-      labels: watermarkedVariants.map((v) => v.label),
-      productCopy,
-      freeGenerationsUsed: freeGenerationsUsed + 1,
-      freeGenerationsLimit: FREE_GENERATIONS_LIMIT,
-    });
+    runGenerationInBackground(orderId, telegramId, req.file.path, description, width, height);
   } catch (err) {
-    console.error('Ошибка при обработке фото:', err);
+    console.error('Ошибка при запуске обработки фото:', err);
     res.status(500).json({ error: 'Не удалось обработать фото', details: String(err.message || err) });
   }
+});
+
+// Фронтенд опрашивает этот эндпоинт после POST /upload, пока не увидит
+// status: 'generated' (или 'error'). progressPercent — честная отметка по
+// факту завершённых шагов, не имитация.
+router.get('/upload/status/:orderId', (req, res) => {
+  const order = getOrder(req.params.orderId);
+  if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+
+  if (order.status === 'generated') {
+    const finalVariants = order.final_paths_json ? JSON.parse(order.final_paths_json) : [];
+    const watermarkedVariants = order.watermarked_paths_json ? JSON.parse(order.watermarked_paths_json) : [];
+    return res.json({
+      status: 'generated',
+      progressPercent: 100,
+      previewUrls: watermarkedVariants.map((v, index) => `/api/preview/${order.id}/${index}`),
+      styles: finalVariants.map((v) => v.style),
+      labels: finalVariants.map((v) => v.label),
+      productCopy: order.product_copy_json ? JSON.parse(order.product_copy_json) : null,
+    });
+  }
+
+  if (order.status === 'error') {
+    return res.json({ status: 'error', progressPercent: order.generation_progress || 0 });
+  }
+
+  res.json({
+    status: order.status, // 'generating'
+    progressPercent: order.generation_progress || 0,
+    step: order.generation_step || null,
+  });
 });
 
 export default router;
