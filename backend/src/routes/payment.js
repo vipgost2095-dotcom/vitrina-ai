@@ -1,10 +1,11 @@
 // routes/payment.js — создание запроса на оплату и проверка статуса.
 // Поддерживает три способа оплаты: ton (прямой TON-перевод), usdt (jetton на TON),
-// stars (Telegram Stars через Bot API). Как только заказ переходит в статус
-// "paid" — сразу же (один раз) отправляем пользователю все 4 карточки в чат с ботом.
+// stars (Telegram Stars через Bot API). Учитывает накопленную реферальную
+// скидку пользователя (0-10%, см. db.js/orderLifecycle.js). Как только заказ
+// переходит в статус "paid" — см. onOrderPaid() в orderLifecycle.js.
 
 import { Router } from 'express';
-import { getOrder, updateOrder, getOrderVariants, markDeliveredOnce } from '../db.js';
+import { getOrder, updateOrder, getUser } from '../db.js';
 import {
   createPaymentRequest,
   checkPaymentOnChain,
@@ -13,23 +14,15 @@ import {
   getJettonWalletAddress,
 } from '../tonPayments.js';
 import { createStarsInvoiceLink } from '../starsPayments.js';
-import { sendCardsToUser } from '../botDelivery.js';
+import { onOrderPaid } from '../orderLifecycle.js';
 
 const router = Router();
 
 const VALID_METHODS = ['ton', 'usdt', 'stars'];
 
-// Общая функция: если заказ только что стал "paid" — один раз отправляет все
-// 4 финальные карточки пользователю через Bot API. Ошибка доставки не должна
-// ломать ответ API (оплата уже прошла), поэтому просто логируем её.
-async function deliverCardsIfNeeded(order) {
-  if (!markDeliveredOnce(order.id)) return; // уже отправляли — выходим
-  try {
-    const { finalPaths } = getOrderVariants(order);
-    await sendCardsToUser(order.telegram_id, finalPaths);
-  } catch (err) {
-    console.error(`Не удалось отправить карточки боту для заказа ${order.id}:`, err);
-  }
+function getUserDiscountPercent(telegramId) {
+  const user = getUser(telegramId);
+  return user?.referral_discount_percent || 0;
 }
 
 // Шаг 1: фронтенд запрашивает параметры оплаты для выбранного способа
@@ -43,36 +36,41 @@ router.post('/payment/create', async (req, res) => {
     const order = getOrder(orderId);
     if (!order) return res.status(404).json({ error: 'Заказ не найден' });
 
+    const discountPercent = getUserDiscountPercent(order.telegram_id);
+
     if (method === 'ton') {
-      const paymentRequest = createPaymentRequest(orderId);
+      const paymentRequest = createPaymentRequest(orderId, discountPercent);
       updateOrder(orderId, {
         status: 'awaiting_payment',
         payment_method: 'ton',
         amount_ton: paymentRequest.amountTon,
         receiver_address: paymentRequest.receiverAddress,
+        discount_percent: discountPercent,
       });
       return res.json({ method: 'ton', ...paymentRequest });
     }
 
     if (method === 'usdt') {
-      const paymentRequest = createUsdtPaymentRequest(orderId);
+      const paymentRequest = createUsdtPaymentRequest(orderId, discountPercent);
       updateOrder(orderId, {
         status: 'awaiting_payment',
         payment_method: 'usdt',
         usdt_amount: paymentRequest.amountUsdt,
         receiver_address: paymentRequest.receiverAddress,
+        discount_percent: discountPercent,
       });
       return res.json({ method: 'usdt', ...paymentRequest });
     }
 
     if (method === 'stars') {
-      const { invoiceLink, starsAmount } = await createStarsInvoiceLink(orderId);
+      const { invoiceLink, starsAmount } = await createStarsInvoiceLink(orderId, discountPercent);
       updateOrder(orderId, {
         status: 'awaiting_payment',
         payment_method: 'stars',
         stars_amount: starsAmount,
+        discount_percent: discountPercent,
       });
-      return res.json({ method: 'stars', invoiceLink, starsAmount });
+      return res.json({ method: 'stars', invoiceLink, starsAmount, discountPercent });
     }
   } catch (err) {
     console.error('Ошибка создания платежа:', err);
@@ -96,8 +94,9 @@ router.post('/payment/usdt-wallet', async (req, res) => {
 });
 
 // Шаг 2: фронтенд периодически опрашивает этот эндпоинт, пока статус не станет "paid".
-// Для ton/usdt проверка идёт по блокчейну, для stars — статус уже выставлен ботом
-// (см. routes/internal.js), здесь просто отдаём текущее состояние заказа.
+// Для ton/usdt проверка идёт по блокчейну (по ТОЙ сумме, что реально была
+// показана пользователю — order.amount_ton/usdt_amount, уже с учётом скидки),
+// для stars — статус уже выставлен ботом (см. routes/internal.js).
 router.get('/payment/status/:orderId', async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -105,25 +104,25 @@ router.get('/payment/status/:orderId', async (req, res) => {
     if (!order) return res.status(404).json({ error: 'Заказ не найден' });
 
     if (order.status === 'paid') {
-      await deliverCardsIfNeeded(order);
+      await onOrderPaid(order);
       return res.json({ status: 'paid', txHash: order.tx_hash });
     }
 
     if (order.status === 'awaiting_payment') {
       if (order.payment_method === 'ton') {
-        const txHash = await checkPaymentOnChain(orderId);
+        const txHash = await checkPaymentOnChain(orderId, order.amount_ton);
         if (txHash) {
           updateOrder(orderId, { status: 'paid', tx_hash: txHash });
           order = getOrder(orderId);
-          await deliverCardsIfNeeded(order);
+          await onOrderPaid(order);
           return res.json({ status: 'paid', txHash });
         }
       } else if (order.payment_method === 'usdt') {
-        const txHash = await checkUsdtPaymentOnChain(orderId);
+        const txHash = await checkUsdtPaymentOnChain(orderId, order.usdt_amount);
         if (txHash) {
           updateOrder(orderId, { status: 'paid', tx_hash: txHash });
           order = getOrder(orderId);
-          await deliverCardsIfNeeded(order);
+          await onOrderPaid(order);
           return res.json({ status: 'paid', txHash });
         }
       }

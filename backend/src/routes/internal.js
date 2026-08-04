@@ -3,8 +3,8 @@
 // защищены общим секретом INTERNAL_API_SECRET, который знают только backend и bot.
 
 import { Router } from 'express';
-import { getOrder, updateOrder, getOrderVariants, markDeliveredOnce } from '../db.js';
-import { sendCardsToUser } from '../botDelivery.js';
+import { getOrder, updateOrder, upsertUser, setReferredBy } from '../db.js';
+import { onOrderPaid } from '../orderLifecycle.js';
 
 const router = Router();
 
@@ -27,15 +27,23 @@ router.post('/internal/mark-paid', requireInternalSecret, async (req, res) => {
     telegram_payment_charge_id: telegramPaymentChargeId || null,
   });
 
-  // Сразу же (один раз) отправляем все 4 карточки пользователю в чат с ботом
-  if (markDeliveredOnce(orderId)) {
-    try {
-      const paidOrder = getOrder(orderId);
-      const { finalPaths } = getOrderVariants(paidOrder);
-      await sendCardsToUser(paidOrder.telegram_id, finalPaths);
-    } catch (err) {
-      console.error(`Не удалось отправить карточки боту для заказа ${orderId}:`, err);
-    }
+  const paidOrder = getOrder(orderId);
+  await onOrderPaid(paidOrder); // доставка карточек + реферальный бонус (см. orderLifecycle.js)
+
+  res.json({ ok: true });
+});
+
+// Бот вызывает это при /start ?ref_<id> — регистрирует, кто кого пригласил.
+// Пользователя может ещё не быть в базе (он не открывал приложение) — создаём
+// запись здесь же.
+router.post('/internal/register-referral', requireInternalSecret, (req, res) => {
+  const { telegramId, username, referredBy } = req.body;
+  if (!telegramId) return res.status(400).json({ error: 'telegramId обязателен' });
+
+  upsertUser({ telegramId: String(telegramId), username });
+
+  if (referredBy && String(referredBy) !== String(telegramId)) {
+    setReferredBy(telegramId, referredBy);
   }
 
   res.json({ ok: true });

@@ -2,15 +2,21 @@
 // желаемого фона/стиля и размера карточки, заданного пользователем.
 // Генерация 3 карточек в реально разных стилях + превью с водяным знаком,
 // плюс (опционально) ИИ-текст карточки: название/описание/буллеты по фото.
+//
+// Ограничение: FREE_GENERATIONS_LIMIT (по умолчанию 3) бесплатных генераций
+// на пользователя — после этого нужно оплатить хотя бы один заказ, чтобы
+// счётчик обнулился и снова стало можно генерировать (см. onOrderPaid в
+// orderLifecycle.js, где происходит сброс).
 
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
 import { v4 as uuidv4 } from 'uuid';
-import { createOrder, updateOrder, upsertUser } from '../db.js';
+import { createOrder, updateOrder, upsertUser, getUser, incrementFreeGenerations } from '../db.js';
 import { generateCardVariants, applyWatermarkToVariants, normalizeSize } from '../photoProcessing.js';
 import { tryGenerateProductCopy } from '../aiCopywriting.js';
+import { FREE_GENERATIONS_LIMIT } from './user.js';
 
 const router = Router();
 
@@ -43,18 +49,32 @@ router.post('/upload', upload.single('photo'), async (req, res) => {
       return res.status(400).json({ error: 'Фото не передано (поле photo)' });
     }
 
+    const telegramId = String(telegramUser.id);
+    upsertUser({ telegramId, username: telegramUser.username });
+
+    // Лимит бесплатных генераций: если исчерпан — не тратим деньги на ИИ,
+    // сразу отвечаем ошибкой с понятным кодом, фронтенд покажет объяснение
+    // и предложит оплатить один из предыдущих заказов.
+    const user = getUser(telegramId);
+    const freeGenerationsUsed = user?.free_generations_used || 0;
+    if (freeGenerationsUsed >= FREE_GENERATIONS_LIMIT) {
+      return res.status(402).json({
+        error: 'Достигнут лимит бесплатных генераций. Оплатите один из предыдущих заказов, чтобы получить ещё генераций.',
+        limitReached: true,
+        freeGenerationsUsed,
+        freeGenerationsLimit: FREE_GENERATIONS_LIMIT,
+      });
+    }
+
     // Текстовое описание желаемого фона/стиля — необязательное поле формы.
     const description = typeof req.body.description === 'string' ? req.body.description.slice(0, 500) : '';
 
-    // Размер карточки задаёт сам пользователь — normalizeSize подстрахует
-    // от совсем неадекватных значений (см. MIN_SIZE/MAX_SIZE в photoProcessing.js).
+    // Размер карточки задаёт сам пользователь.
     const width = normalizeSize(req.body.width);
     const height = normalizeSize(req.body.height);
 
-    upsertUser({ telegramId: String(telegramUser.id), username: telegramUser.username });
-
     const orderId = uuidv4();
-    createOrder({ id: orderId, telegramId: String(telegramUser.id), originalPath: req.file.path });
+    createOrder({ id: orderId, telegramId, originalPath: req.file.path });
 
     // Генерируем карточки (без вотемарки) — они понадобятся после оплаты
     const finalVariants = await generateCardVariants(req.file.path, orderId, description, width, height);
@@ -71,12 +91,17 @@ router.post('/upload', upload.single('photo'), async (req, res) => {
       product_copy_json: productCopy ? JSON.stringify(productCopy) : null,
     });
 
+    // Генерация реально состоялась — засчитываем её в лимит
+    incrementFreeGenerations(telegramId);
+
     res.json({
       orderId,
       previewUrls: watermarkedVariants.map((v, index) => `/api/preview/${orderId}/${index}`),
       styles: watermarkedVariants.map((v) => v.style),
       labels: watermarkedVariants.map((v) => v.label),
       productCopy,
+      freeGenerationsUsed: freeGenerationsUsed + 1,
+      freeGenerationsLimit: FREE_GENERATIONS_LIMIT,
     });
   } catch (err) {
     console.error('Ошибка при обработке фото:', err);
