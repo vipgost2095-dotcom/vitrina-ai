@@ -89,6 +89,35 @@ export const STRINGS = {
     downloadOne: (label) => `Скачать: ${label}`,
     downloadZip: 'Скачать все карточки (zip)',
     downloadText: 'Скачать текст карточки (txt)',
+
+    footerHistoryLink: 'История генераций',
+    footerTermsLink: 'Условия использования',
+
+    historyTitle: 'История генераций',
+    historySubtitle: 'Здесь все ваши карточки — можно вернуться и оплатить любую из неоплаченных',
+    historyEmpty: 'Пока пусто — сгенерируйте первую карточку',
+    historyPaid: 'Оплачено',
+    historyUnpaid: 'Не оплачено',
+    historyPayButton: 'Оплатить',
+    historyError: 'Не удалось загрузить историю',
+
+    termsTitle: 'Условия использования',
+    termsBody:
+      'Используя ВитринаAI, вы соглашаетесь со следующими условиями.\n\n' +
+      '1. Характер услуги\n' +
+      'ВитринаAI генерирует карточки товара с помощью искусственного интеллекта на основе загруженного вами фото и (по желанию) текстового описания. Результат — творческая интерпретация ИИ: сервис не гарантирует точное соответствие ожиданиям, отсутствие визуальных артефактов или ошибок, включая некорректный текст на изображении.\n\n' +
+      '2. Ваш контент\n' +
+      'Вы подтверждаете, что имеете право загружать фото, которые отправляете в сервис, и несёте ответственность за их содержание. Не загружайте изображения, нарушающие права третьих лиц или законодательство.\n\n' +
+      '3. Бесплатные генерации и оплата\n' +
+      'Сервис даёт ограниченное количество бесплатных генераций. Файлы без водяного знака становятся доступны после оплаты. Оплата принимается в TON, USDT (сеть TON) или Telegram Stars. Платежи в криптовалюте и Stars окончательны и возврату не подлежат, за исключением случаев, прямо предусмотренных законом.\n\n' +
+      '4. Реферальная программа\n' +
+      'Скидка начисляется за приглашённых пользователей, совершивших первую оплату, в размере и с ограничениями, указанными в приложении. Условия программы могут быть изменены.\n\n' +
+      '5. Ограничение ответственности\n' +
+      'Сервис предоставляется "как есть". Мы не несём ответственности за косвенные убытки, связанные с использованием сгенерированных материалов, включая их публикацию на маркетплейсах.\n\n' +
+      '6. Изменения условий\n' +
+      'Условия могут обновляться — актуальная версия всегда доступна в приложении.\n\n' +
+      '7. Контакты\n' +
+      'По вопросам обращайтесь через бота.',
   },
 
   en: {
@@ -178,6 +207,35 @@ export const STRINGS = {
     downloadOne: (label) => `Download: ${label}`,
     downloadZip: 'Download all cards (zip)',
     downloadText: 'Download card text (txt)',
+
+    footerHistoryLink: 'Generation history',
+    footerTermsLink: 'Terms of use',
+
+    historyTitle: 'Generation history',
+    historySubtitle: 'All your cards are here — you can come back and pay for any unpaid one',
+    historyEmpty: 'Nothing here yet — generate your first card',
+    historyPaid: 'Paid',
+    historyUnpaid: 'Unpaid',
+    historyPayButton: 'Pay',
+    historyError: 'Could not load history',
+
+    termsTitle: 'Terms of use',
+    termsBody:
+      'By using VitrinaAI, you agree to the following terms.\n\n' +
+      '1. Nature of the service\n' +
+      'VitrinaAI generates product cards using artificial intelligence based on the photo you upload and (optionally) a text description. The result is an AI creative interpretation: the service does not guarantee an exact match to your expectations, absence of visual artifacts, or absence of errors, including incorrect text rendered on the image.\n\n' +
+      '2. Your content\n' +
+      'You confirm that you have the right to upload the photos you submit to the service and are responsible for their content. Do not upload images that infringe on the rights of third parties or violate the law.\n\n' +
+      '3. Free generations and payment\n' +
+      'The service provides a limited number of free generations. Files without a watermark become available after payment. Payment is accepted in TON, USDT (TON network), or Telegram Stars. Cryptocurrency and Stars payments are final and non-refundable, except as expressly required by law.\n\n' +
+      '4. Referral program\n' +
+      'A discount is granted for referred users who complete their first payment, in the amount and subject to the limits shown in the app. The program terms may change.\n\n' +
+      '5. Limitation of liability\n' +
+      'The service is provided "as is". We are not liable for indirect losses related to the use of generated materials, including their publication on marketplaces.\n\n' +
+      '6. Changes to these terms\n' +
+      'Terms may be updated — the current version is always available in the app.\n\n' +
+      '7. Contact\n' +
+      'For questions, contact us through the bot.',
   },
 };
 

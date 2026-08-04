@@ -7,15 +7,21 @@ import ReferralBlock from './components/ReferralBlock.jsx';
 import UploadForm from './components/UploadForm.jsx';
 import CardPreview from './components/CardPreview.jsx';
 import PaymentScreen from './components/PaymentScreen.jsx';
+import HistoryScreen from './components/HistoryScreen.jsx';
+import TermsScreen from './components/TermsScreen.jsx';
 
-// Шаги сценария: загрузить фото -> превью -> оплата (кошелёк подключается
-// по желанию, только если выбран способ оплаты TON или USDT — см. PaymentScreen)
+// Основные шаги сценария: загрузить фото -> превью -> оплата (кошелёк
+// подключается по желанию, только если выбран способ оплаты TON или USDT —
+// см. PaymentScreen). HISTORY и TERMS — вспомогательные экраны, доступные
+// по ссылкам в подвале экрана загрузки, возврат всегда идёт на UPLOAD.
 const STEPS = {
   UPLOAD: 'upload',
   PREVIEW: 'preview',
   PAYMENT: 'payment',
+  HISTORY: 'history',
+  TERMS: 'terms',
 };
-const STEP_ORDER = [STEPS.UPLOAD, STEPS.PREVIEW, STEPS.PAYMENT];
+const MAIN_STEP_ORDER = [STEPS.UPLOAD, STEPS.PREVIEW, STEPS.PAYMENT];
 
 function getInitialLang() {
   try {
@@ -31,8 +37,9 @@ export default function App() {
   const [step, setStep] = useState(STEPS.UPLOAD);
   const [orderId, setOrderId] = useState(null);
   const [previewUrls, setPreviewUrls] = useState([]);
-  const [labels, setLabels] = useState([]);
   const [productCopy, setProductCopy] = useState(null);
+  const [hasProductCopy, setHasProductCopy] = useState(false);
+  const [paymentOrigin, setPaymentOrigin] = useState(STEPS.PREVIEW); // куда вернуться кнопкой "назад" с экрана оплаты
   const [lang, setLang] = useState(getInitialLang);
   const [userStatus, setUserStatus] = useState(null);
 
@@ -54,7 +61,8 @@ export default function App() {
   }
 
   const t = getStrings(lang);
-  const stepIndex = STEP_ORDER.indexOf(step);
+  const isMainStep = MAIN_STEP_ORDER.includes(step);
+  const stepIndex = MAIN_STEP_ORDER.indexOf(step);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-tg-bg text-tg-text">
@@ -78,19 +86,21 @@ export default function App() {
           </h1>
           <p className="mt-1 text-xs text-tg-hint">{t.appSubtitle}</p>
 
-          <div className="mx-auto mt-4 flex max-w-xs items-center gap-2">
-            {STEP_ORDER.map((s, i) => (
-              <div
-                key={s}
-                className={`h-1.5 flex-1 rounded-full transition-colors ${
-                  i <= stepIndex ? 'bg-gradient-to-r from-indigo-500 to-fuchsia-500' : 'bg-tg-hint/15'
-                }`}
-              />
-            ))}
-          </div>
+          {isMainStep && (
+            <div className="mx-auto mt-4 flex max-w-xs items-center gap-2">
+              {MAIN_STEP_ORDER.map((s, i) => (
+                <div
+                  key={s}
+                  className={`h-1.5 flex-1 rounded-full transition-colors ${
+                    i <= stepIndex ? 'bg-gradient-to-r from-indigo-500 to-fuchsia-500' : 'bg-tg-hint/15'
+                  }`}
+                />
+              ))}
+            </div>
+          )}
         </header>
 
-        <main className="flex-1 px-4 pb-10">
+        <main className="flex-1 px-4 pb-6">
           {step === STEPS.UPLOAD && (
             <div className="flex flex-col gap-4">
               <WalletConnect t={t} />
@@ -102,8 +112,9 @@ export default function App() {
                 onUploaded={(id, urls, uploadedStyles, uploadedLabels, uploadedCopy) => {
                   setOrderId(id);
                   setPreviewUrls(urls);
-                  setLabels(uploadedLabels);
                   setProductCopy(uploadedCopy);
+                  setHasProductCopy(!!uploadedCopy);
+                  setPaymentOrigin(STEPS.PREVIEW);
                   setStep(STEPS.PREVIEW);
                 }}
               />
@@ -124,13 +135,41 @@ export default function App() {
             <PaymentScreen
               t={t}
               orderId={orderId}
-              hasProductCopy={!!productCopy}
+              hasProductCopy={hasProductCopy}
               discountPercent={userStatus?.referralDiscountPercent || 0}
-              onBack={() => setStep(STEPS.PREVIEW)}
+              onBack={() => setStep(paymentOrigin)}
               onPaid={() => getUserStatus().then(setUserStatus).catch(() => {})}
             />
           )}
+
+          {step === STEPS.HISTORY && (
+            <HistoryScreen
+              t={t}
+              onBack={() => setStep(STEPS.UPLOAD)}
+              onSelectOrder={(id, orderHasProductCopy) => {
+                setOrderId(id);
+                setHasProductCopy(orderHasProductCopy);
+                setProductCopy(null); // полный текст карточки для истории не подгружаем — на экране оплаты он не нужен
+                setPaymentOrigin(STEPS.HISTORY);
+                setStep(STEPS.PAYMENT);
+              }}
+            />
+          )}
+
+          {step === STEPS.TERMS && <TermsScreen t={t} onBack={() => setStep(STEPS.UPLOAD)} />}
         </main>
+
+        {step === STEPS.UPLOAD && (
+          <footer className="flex items-center justify-center gap-4 px-4 pb-6 text-xs text-tg-hint">
+            <button onClick={() => setStep(STEPS.HISTORY)} className="underline underline-offset-2 hover:text-tg-text">
+              {t.footerHistoryLink}
+            </button>
+            <span className="opacity-30">•</span>
+            <button onClick={() => setStep(STEPS.TERMS)} className="underline underline-offset-2 hover:text-tg-text">
+              {t.footerTermsLink}
+            </button>
+          </footer>
+        )}
       </div>
     </div>
   );

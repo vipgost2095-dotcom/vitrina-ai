@@ -117,3 +117,15 @@ export async function getUserStatus() {
   }
   return res.json(); // { freeGenerationsUsed, freeGenerationsLimit, freeGenerationsRemaining, referralDiscountPercent }
 }
+
+// История генераций — чтобы можно было вернуться и оплатить прошлый заказ
+export async function getHistory() {
+  const res = await fetch(`${BASE_URL}/api/history`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Не удалось загрузить историю генераций');
+  }
+  return res.json(); // { items: [{ orderId, status, createdAt, previewUrl, hasProductCopy }] }
+}
