@@ -75,55 +75,64 @@ const QUALITY_SUFFIX =
   'Photograph the product straight-on and level, centered in the frame, ' +
   'not tilted or rotated, no dramatic diagonal angles.';
 
-// Только для режима openai_full (без точной альфа-маски) — по умолчанию
-// жёсткое условие "не трогай товар" добавляется всегда, независимо от того,
-// что написал пользователь про фон, иначе есть риск, что модель заодно
-// "улучшит"/подменит сам товар. Это единственное ограничение, которое
-// остаётся даже при "точно как написал пользователь, без ограничений" — можно
-// полностью отключить через AI_STRICT_PRODUCT_INTEGRITY=false в .env, если
-// точно понимаете, что делаете (без маски результат тогда совсем не
-// гарантирован — модель может исказить сам товар).
+// Только для режима openai_full (без точной альфа-маски) — жёсткое условие
+// "не трогай товар" обязательно всегда, независимо от того, что написал
+// пользователь про фон, иначе есть риск, что модель заодно "улучшит" сам товар.
 const PRODUCT_INTEGRITY_INSTRUCTION =
   'Keep the product itself exactly as in the original photo — same shape, colors, ' +
   'proportions, text and logos on the product — do not redesign, restyle or alter ' +
   'the product in any way.';
-const STRICT_PRODUCT_INTEGRITY = process.env.AI_STRICT_PRODUCT_INTEGRITY !== 'false';
 
 /**
  * Основная функция: принимает путь к загруженному фото, (необязательное)
  * текстовое описание от пользователя и желаемый размер карточки (ширина,
  * высота в пикселях) — возвращает массив из 3 путей к сгенерированным
  * карточкам (без водяного знака), каждая в своём стиле.
+ *
+ * onProgress(percent, step) — необязательный колбэк, вызывается после
+ * КАЖДОГО реально завершившегося шага (не имитация — честные отметки по
+ * факту готовности), чтобы вызывающий код (routes/upload.js) мог сохранять
+ * прогресс в БД и отдавать его фронтенду через опрос статуса.
  */
-export async function generateCardVariants(originalPath, orderId, userDescription, width, height) {
+export async function generateCardVariants(originalPath, orderId, userDescription, width, height, onProgress) {
   const w = normalizeSize(width);
   const h = normalizeSize(height);
   const provider = process.env.AI_BACKGROUND_PROVIDER || 'stub';
 
   const results = [];
+  // Доли общего прогресса: подготовка (вырезание фона) — 10%, дальше по
+  // ~27% на каждый из 3 вариантов = 91%, округляем последний до 90%.
+  const PREP_PERCENT = 10;
+  const PER_VARIANT_PERCENT = Math.floor((90 - PREP_PERCENT) / STYLE_VARIATIONS.length);
 
   if (provider === 'openai_full') {
     // Режим "всё в одном": каждый вызов идёт прямо на исходное фото — модель
     // сама и убирает старый фон, и рисует новый. См. предупреждение ниже
     // в tryGenerateAiPhotoFull про отсутствие точной маски.
     const originalBuffer = fs.readFileSync(originalPath);
-    for (const style of STYLE_VARIATIONS) {
+    onProgress?.(PREP_PERCENT, 'prepare');
+    for (let i = 0; i < STYLE_VARIATIONS.length; i++) {
+      const style = STYLE_VARIATIONS[i];
       const aiPhotoBuffer = await tryGenerateAiPhotoFull(originalBuffer, userDescription, style.styleHint, w, h);
       const finalPath = aiPhotoBuffer
         ? await renderCardFromAiPhoto(aiPhotoBuffer, style.name, w, h, orderId)
         : await renderCardWithGradientStub(originalBuffer, style, w, h, orderId);
       results.push({ style: style.name, label: style.name, width: w, height: h, path: finalPath });
+      onProgress?.(PREP_PERCENT + (i + 1) * PER_VARIANT_PERCENT, style.name);
     }
   } else {
     // Обычный режим: вырезаем товар ОДИН раз (это не про стиль, это точная
     // маска), а дальше на его основе — 3 разных ИИ-генерации фона.
     const cutoutBuffer = await getProductCutout(originalPath);
-    for (const style of STYLE_VARIATIONS) {
+    onProgress?.(PREP_PERCENT, 'cutout');
+    for (let i = 0; i < STYLE_VARIATIONS.length; i++) {
+      const style = STYLE_VARIATIONS[i];
       const aiPhotoBuffer = await tryGenerateAiPhoto(cutoutBuffer, userDescription, style.styleHint, w, h);
       const finalPath = aiPhotoBuffer
         ? await renderCardFromAiPhoto(aiPhotoBuffer, style.name, w, h, orderId)
         : await renderCardWithGradientStub(cutoutBuffer, style, w, h, orderId);
       results.push({ style: style.name, label: style.name, width: w, height: h, path: finalPath });
+      onProgress?.(PREP_PERCENT + (i + 1) * PER_VARIANT_PERCENT, style.name);
     }
   }
 
@@ -183,36 +192,22 @@ async function tryGenerateAiPhoto(cutoutBuffer, userDescription, styleHint, widt
  * Если пользователь ничего не написал — базой становится сам styleHint.
  */
 /**
- * Собирает финальный промпт для ИИ.
- *
- * ⚠️ ЕСЛИ ПОЛЬЗОВАТЕЛЬ ЧТО-ТО НАПИСАЛ — используем ЕГО ТЕКСТ БУКВАЛЬНО, без
- * единой добавки: ни стилевой подсказки варианта, ни "сними прямо, без
- * наклона", ни "без текста/водяных знаков". Раньше сюда всё равно доклеивались
- * технические требования — из-за этого результат мог не совпадать с тем, что
- * человек реально просил (например, если он хотел динамичный ракурс под
- * углом или текст на карточке, "не наклоняй"/"без текста" ему бы мешали).
- * Это осознанный компромисс: без страховки "без лишнего текста" модель
- * иногда может добавить случайные надписи/артефакты на фон — так теперь
- * работает по вашему прямому запросу "без ограничений".
- *
- * Если пользователь НИЧЕГО не написал — используется прежняя логика с
- * запасным промптом по умолчанию (стилевая подсказка варианта + технические
- * требования) — там ограничивать нечего, это уже наш собственный дефолт.
+ * Собирает финальный промпт: описание пользователя (если есть) как есть +
+ * стилевое направление этого конкретного варианта + технические требования.
+ * Если пользователь ничего не написал — базой становится сам styleHint.
  */
 function buildPrompt(userDescription, envOverrideVarName, styleHint, { requireProductIntegrity = false } = {}) {
   const description = (userDescription || '').trim();
-  const integrityPart = requireProductIntegrity && STRICT_PRODUCT_INTEGRITY ? ` ${PRODUCT_INTEGRITY_INSTRUCTION}` : '';
+  const integrityPart = requireProductIntegrity ? ` ${PRODUCT_INTEGRITY_INSTRUCTION}` : '';
+  const envOverride = process.env[envOverrideVarName];
 
+  let corePrompt;
   if (description) {
-    // Буквально то, что написал пользователь. requireProductIntegrity
-    // (только режим openai_full) — единственное, что всё равно добавляется,
-    // и не про стиль, а про то, чтобы ИИ не подменил сам товар — см.
-    // AI_STRICT_PRODUCT_INTEGRITY в .env, если хотите убрать и это тоже.
-    return integrityPart ? `${description}.${integrityPart}` : description;
+    corePrompt = `${description}, ${styleHint || DEFAULT_BACKGROUND_PROMPT}`;
+  } else {
+    corePrompt = `${envOverride ? envOverride + ', ' : ''}${styleHint || DEFAULT_BACKGROUND_PROMPT}`;
   }
 
-  const envOverride = process.env[envOverrideVarName];
-  const corePrompt = `${envOverride ? envOverride + ', ' : ''}${styleHint || DEFAULT_BACKGROUND_PROMPT}`;
   return `${corePrompt}. ${QUALITY_SUFFIX}${integrityPart}`;
 }
 

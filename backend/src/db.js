@@ -59,6 +59,12 @@ const orderMigrations = [
   // оплаты в блокчейне всегда сверялась с той суммой, которую реально попросили
   // заплатить, а не с "чистой" ценой без скидки.
   ['discount_percent', "ALTER TABLE orders ADD COLUMN discount_percent INTEGER DEFAULT 0"],
+  // generation_progress/generation_step — реальный прогресс фоновой генерации
+  // карточек (0-100%), чтобы фронтенд мог показать честный индикатор вместо
+  // "нарисованной" анимации. Статус заказа при этом: created -> generating ->
+  // generated -> ... Обновляются по ходу генерации (см. routes/upload.js).
+  ['generation_progress', "ALTER TABLE orders ADD COLUMN generation_progress INTEGER DEFAULT 0"],
+  ['generation_step', "ALTER TABLE orders ADD COLUMN generation_step TEXT"],
 ];
 for (const [column, sql] of orderMigrations) {
   if (!existingOrderColumns.has(column)) db.exec(sql);
