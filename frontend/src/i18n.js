@@ -90,7 +90,7 @@ export const STRINGS = {
     downloadZip: 'Скачать все карточки (zip)',
     downloadText: 'Скачать текст карточки (txt)',
 
-    footerHistoryLink: 'История генераций',
+    footerHistoryLink: 'История',
     footerTermsLink: 'Условия использования',
 
     historyTitle: 'История генераций',
@@ -208,7 +208,7 @@ export const STRINGS = {
     downloadZip: 'Download all cards (zip)',
     downloadText: 'Download card text (txt)',
 
-    footerHistoryLink: 'Generation history',
+    footerHistoryLink: 'History',
     footerTermsLink: 'Terms of use',
 
     historyTitle: 'Generation history',

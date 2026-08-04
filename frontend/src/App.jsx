@@ -73,6 +73,15 @@ export default function App() {
 
       <div className="relative flex min-h-screen flex-col">
         <header className="relative px-5 pb-4 pt-6 text-center">
+          {step !== STEPS.HISTORY && (
+            <button
+              onClick={() => setStep(STEPS.HISTORY)}
+              className="absolute left-4 top-6 flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs font-semibold text-tg-hint transition hover:text-tg-text"
+            >
+              🕘 {t.footerHistoryLink}
+            </button>
+          )}
+
           <button
             onClick={toggleLang}
             aria-label="Switch language"
@@ -160,11 +169,7 @@ export default function App() {
         </main>
 
         {step === STEPS.UPLOAD && (
-          <footer className="flex items-center justify-center gap-4 px-4 pb-6 text-xs text-tg-hint">
-            <button onClick={() => setStep(STEPS.HISTORY)} className="underline underline-offset-2 hover:text-tg-text">
-              {t.footerHistoryLink}
-            </button>
-            <span className="opacity-30">•</span>
+          <footer className="flex items-center justify-center px-4 pb-6 text-xs text-tg-hint">
             <button onClick={() => setStep(STEPS.TERMS)} className="underline underline-offset-2 hover:text-tg-text">
               {t.footerTermsLink}
             </button>
