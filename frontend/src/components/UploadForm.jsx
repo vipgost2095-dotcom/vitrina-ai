@@ -49,7 +49,7 @@ export default function UploadForm({ t, lang, status, onUploaded, onStatusChange
     setSelectedPalette(palette);
     setSelectedMood(mood);
     setSelectedTexture(texture);
-    setDescription(composeStylePhrase(palette, mood, texture));
+    setDescription(composeStylePhrase(palette, mood, texture, lang));
   }
 
   function handlePaletteClick(item) {
