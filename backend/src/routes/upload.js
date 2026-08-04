@@ -88,22 +88,27 @@ router.post('/upload', upload.single('photo'), async (req, res) => {
     const telegramId = String(telegramUser.id);
     upsertUser({ telegramId, username: telegramUser.username });
 
-    // Лимит бесплатных генераций проверяем СРАЗУ, синхронно — чтобы не
-    // запускать (и не тратить на ИИ) фоновую генерацию, если лимит исчерпан.
+    // Лимит бесплатных генераций проверяем СРАЗУ, синхронно. Если исчерпан —
+    // НЕ блокируем насовсем: создаём заказ, который сгенерируется СРАЗУ ПОСЛЕ
+    // оплаты (тем же способом — TON/USDT/Stars, как обычно), а не наоборот.
+    // Так деньги на ИИ не тратятся, пока пользователь не заплатил.
     const user = getUser(telegramId);
     const freeGenerationsUsed = user?.free_generations_used || 0;
-    if (freeGenerationsUsed >= FREE_GENERATIONS_LIMIT) {
-      return res.status(402).json({
-        error: 'Достигнут лимит бесплатных генераций. Оплатите один из предыдущих заказов, чтобы получить ещё генераций.',
-        limitReached: true,
-        freeGenerationsUsed,
-        freeGenerationsLimit: FREE_GENERATIONS_LIMIT,
-      });
-    }
-
     const width = normalizeSize(req.body.width);
     const height = normalizeSize(req.body.height);
     const originalPath = req.file ? req.file.path : null;
+
+    if (freeGenerationsUsed >= FREE_GENERATIONS_LIMIT) {
+      const orderId = uuidv4();
+      createOrder({ id: orderId, telegramId, originalPath });
+      updateOrder(orderId, {
+        generate_after_payment: 1,
+        pending_description: description,
+        pending_width: width,
+        pending_height: height,
+      });
+      return res.json({ orderId, requiresPayment: true });
+    }
 
     const orderId = uuidv4();
     createOrder({ id: orderId, telegramId, originalPath });

@@ -93,6 +93,21 @@ router.post('/payment/usdt-wallet', async (req, res) => {
   }
 });
 
+// Собирает ответ для статуса "paid" — для обычных заказов ничего, кроме
+// txHash, не нужно; для generate_after_payment (лимит был исчерпан) фронтенд
+// должен узнать, идёт ли ещё генерация и на каком она проценте.
+function buildPaidResponse(order) {
+  const generationPending = !!order.generate_after_payment && !order.final_paths_json;
+  return {
+    status: 'paid',
+    txHash: order.tx_hash,
+    generationPending,
+    generationProgress: order.generation_progress || 0,
+    generationStep: order.generation_step || null,
+    hasProductCopy: !!order.product_copy_json,
+  };
+}
+
 // Шаг 2: фронтенд периодически опрашивает этот эндпоинт, пока статус не станет "paid".
 // Для ton/usdt проверка идёт по блокчейну (по ТОЙ сумме, что реально была
 // показана пользователю — order.amount_ton/usdt_amount, уже с учётом скидки),
@@ -105,7 +120,8 @@ router.get('/payment/status/:orderId', async (req, res) => {
 
     if (order.status === 'paid') {
       await onOrderPaid(order);
-      return res.json({ status: 'paid', txHash: order.tx_hash });
+      order = getOrder(orderId); // перечитываем — onOrderPaid могла начать фоновую генерацию
+      return res.json(buildPaidResponse(order));
     }
 
     if (order.status === 'awaiting_payment') {
@@ -115,7 +131,8 @@ router.get('/payment/status/:orderId', async (req, res) => {
           updateOrder(orderId, { status: 'paid', tx_hash: txHash });
           order = getOrder(orderId);
           await onOrderPaid(order);
-          return res.json({ status: 'paid', txHash });
+          order = getOrder(orderId);
+          return res.json(buildPaidResponse(order));
         }
       } else if (order.payment_method === 'usdt') {
         const txHash = await checkUsdtPaymentOnChain(orderId, order.usdt_amount);
@@ -123,7 +140,8 @@ router.get('/payment/status/:orderId', async (req, res) => {
           updateOrder(orderId, { status: 'paid', tx_hash: txHash });
           order = getOrder(orderId);
           await onOrderPaid(order);
-          return res.json({ status: 'paid', txHash });
+          order = getOrder(orderId);
+          return res.json(buildPaidResponse(order));
         }
       }
       // Для 'stars' статус меняет только внутренний эндпоинт (routes/internal.js),
