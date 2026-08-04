@@ -22,9 +22,34 @@ import sharp from 'sharp';
 import fetch from 'node-fetch';
 import path from 'node:path';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const GENERATED_DIR = process.env.GENERATED_DIR || './generated';
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
+
+// Шрифт для водяного знака — встраиваем ПРЯМО в SVG как base64 (@font-face
+// с data-URI), а не полагаемся на системные шрифты контейнера. Это принципиально:
+// в логах Railway однажды встречалась ошибка "Fontconfig error: Cannot load
+// default config file" — если в контейнере не настроены/не установлены
+// шрифты, librsvg (через который sharp рендерит SVG) может ТИХО, без единой
+// ошибки в консоли, отрисовать пустоту вместо текста — сама операция при
+// этом "успешно" завершается, просто на выходе невидимый водяной знак. Это
+// объясняет, почему у пользователя карточки генерировались без единой
+// ошибки, а водяного знака на них не было. Шрифт (Bricolage Grotesque Bold,
+// лицензия SIL OFL, см. assets/FONT-LICENSE.txt) читается один раз при
+// старте процесса и кодируется в base64 — дальше рендер водяного знака
+// вообще не обращается к системным шрифтам.
+const WATERMARK_FONT_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets', 'watermark-font.ttf');
+let WATERMARK_FONT_BASE64 = null;
+try {
+  WATERMARK_FONT_BASE64 = fs.readFileSync(WATERMARK_FONT_PATH).toString('base64');
+} catch (err) {
+  console.warn(
+    'Не удалось загрузить встроенный шрифт водяного знака (' + WATERMARK_FONT_PATH + ') — ' +
+      'водяной знак откатится на системный шрифт, который в контейнере может отсутствовать:',
+    err.message
+  );
+}
 
 const MIN_SIZE = 200;
 const MAX_SIZE = 2048;
@@ -546,7 +571,8 @@ export async function applyWatermarkToVariants(variants, orderId) {
     const watermarkSvg = Buffer.from(`
       <svg width="${variant.width}" height="${variant.height}" xmlns="http://www.w3.org/2000/svg">
         <style>
-          .wm { fill: rgba(255,0,0,0.6); font-size: ${fontSize}px; font-family: sans-serif; font-weight: 700; }
+          ${WATERMARK_FONT_BASE64 ? `@font-face { font-family: 'WatermarkFont'; font-weight: 700; src: url(data:font/truetype;base64,${WATERMARK_FONT_BASE64}) format('truetype'); }` : ''}
+          .wm { fill: rgba(255,0,0,0.6); font-size: ${fontSize}px; font-family: ${WATERMARK_FONT_BASE64 ? "'WatermarkFont', " : ''}sans-serif; font-weight: 700; }
         </style>
         ${buildWatermarkTiles(variant.width, variant.height, fontSize)}
       </svg>
