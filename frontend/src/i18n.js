@@ -118,6 +118,11 @@ export const STRINGS = {
       'Условия могут обновляться — актуальная версия всегда доступна в приложении.\n\n' +
       '7. Контакты\n' +
       'По вопросам обращайтесь через бота.',
+
+    consentTitle: 'Прежде чем начать',
+    consentSubtitle: 'Пожалуйста, ознакомьтесь с условиями использования сервиса',
+    consentCheckboxLabel: 'Я согласен с условиями использования',
+    consentContinueButton: 'Продолжить',
   },
 
   en: {
@@ -236,6 +241,11 @@ export const STRINGS = {
       'Terms may be updated — the current version is always available in the app.\n\n' +
       '7. Contact\n' +
       'For questions, contact us through the bot.',
+
+    consentTitle: 'Before you start',
+    consentSubtitle: 'Please review the terms of use for this service',
+    consentCheckboxLabel: 'I agree to the terms of use',
+    consentContinueButton: 'Continue',
   },
 };
 

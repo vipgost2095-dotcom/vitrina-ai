@@ -9,6 +9,7 @@ import CardPreview from './components/CardPreview.jsx';
 import PaymentScreen from './components/PaymentScreen.jsx';
 import HistoryScreen from './components/HistoryScreen.jsx';
 import TermsScreen from './components/TermsScreen.jsx';
+import ConsentScreen from './components/ConsentScreen.jsx';
 
 // Основные шаги сценария: загрузить фото -> превью -> оплата (кошелёк
 // подключается по желанию, только если выбран способ оплаты TON или USDT —
@@ -33,6 +34,16 @@ function getInitialLang() {
   return 'ru';
 }
 
+// Согласие с условиями спрашиваем один раз — дальше запоминаем в localStorage,
+// чтобы не переспрашивать при каждом открытии приложения.
+function getInitialConsent() {
+  try {
+    return window.localStorage?.getItem('vitrinaai_terms_accepted') === '1';
+  } catch {
+    return false;
+  }
+}
+
 export default function App() {
   const [step, setStep] = useState(STEPS.UPLOAD);
   const [orderId, setOrderId] = useState(null);
@@ -42,6 +53,7 @@ export default function App() {
   const [paymentOrigin, setPaymentOrigin] = useState(STEPS.PREVIEW); // куда вернуться кнопкой "назад" с экрана оплаты
   const [lang, setLang] = useState(getInitialLang);
   const [userStatus, setUserStatus] = useState(null);
+  const [termsAccepted, setTermsAccepted] = useState(getInitialConsent);
 
   useEffect(() => {
     initTelegram();
@@ -49,6 +61,15 @@ export default function App() {
       // не критично — просто не покажем блок с лимитом/скидкой сразу
     });
   }, []);
+
+  function acceptTerms() {
+    setTermsAccepted(true);
+    try {
+      window.localStorage?.setItem('vitrinaai_terms_accepted', '1');
+    } catch {
+      // не критично — просто придётся согласиться заново в следующий раз
+    }
+  }
 
   function toggleLang() {
     const next = lang === 'ru' ? 'en' : 'ru';
@@ -73,7 +94,7 @@ export default function App() {
 
       <div className="relative flex min-h-screen flex-col">
         <header className="relative px-5 pb-4 pt-6 text-center">
-          {step !== STEPS.HISTORY && (
+          {termsAccepted && step !== STEPS.HISTORY && (
             <button
               onClick={() => setStep(STEPS.HISTORY)}
               className="absolute left-4 top-6 flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs font-semibold text-tg-hint transition hover:text-tg-text"
@@ -95,7 +116,7 @@ export default function App() {
           </h1>
           <p className="mt-1 text-xs text-tg-hint">{t.appSubtitle}</p>
 
-          {isMainStep && (
+          {termsAccepted && isMainStep && (
             <div className="mx-auto mt-4 flex max-w-xs items-center gap-2">
               {MAIN_STEP_ORDER.map((s, i) => (
                 <div
@@ -110,65 +131,71 @@ export default function App() {
         </header>
 
         <main className="flex-1 px-4 pb-6">
-          {step === STEPS.UPLOAD && (
-            <div className="flex flex-col gap-4">
-              <WalletConnect t={t} />
-              <ReferralBlock t={t} discountPercent={userStatus?.referralDiscountPercent} />
-              <UploadForm
-                t={t}
-                status={userStatus}
-                onStatusChange={() => getUserStatus().then(setUserStatus).catch(() => {})}
-                onUploaded={(id, urls, uploadedStyles, uploadedLabels, uploadedCopy) => {
-                  setOrderId(id);
-                  setPreviewUrls(urls);
-                  setProductCopy(uploadedCopy);
-                  setHasProductCopy(!!uploadedCopy);
-                  setPaymentOrigin(STEPS.PREVIEW);
-                  setStep(STEPS.PREVIEW);
-                }}
-              />
-            </div>
-          )}
+          {!termsAccepted ? (
+            <ConsentScreen t={t} onAccept={acceptTerms} />
+          ) : (
+            <>
+              {step === STEPS.UPLOAD && (
+                <div className="flex flex-col gap-4">
+                  <WalletConnect t={t} />
+                  <ReferralBlock t={t} discountPercent={userStatus?.referralDiscountPercent} />
+                  <UploadForm
+                    t={t}
+                    status={userStatus}
+                    onStatusChange={() => getUserStatus().then(setUserStatus).catch(() => {})}
+                    onUploaded={(id, urls, uploadedStyles, uploadedLabels, uploadedCopy) => {
+                      setOrderId(id);
+                      setPreviewUrls(urls);
+                      setProductCopy(uploadedCopy);
+                      setHasProductCopy(!!uploadedCopy);
+                      setPaymentOrigin(STEPS.PREVIEW);
+                      setStep(STEPS.PREVIEW);
+                    }}
+                  />
+                </div>
+              )}
 
-          {step === STEPS.PREVIEW && (
-            <CardPreview
-              t={t}
-              previewUrls={previewUrls}
-              productCopy={productCopy}
-              onPay={() => setStep(STEPS.PAYMENT)}
-              onBack={() => setStep(STEPS.UPLOAD)}
-            />
-          )}
+              {step === STEPS.PREVIEW && (
+                <CardPreview
+                  t={t}
+                  previewUrls={previewUrls}
+                  productCopy={productCopy}
+                  onPay={() => setStep(STEPS.PAYMENT)}
+                  onBack={() => setStep(STEPS.UPLOAD)}
+                />
+              )}
 
-          {step === STEPS.PAYMENT && (
-            <PaymentScreen
-              t={t}
-              orderId={orderId}
-              hasProductCopy={hasProductCopy}
-              discountPercent={userStatus?.referralDiscountPercent || 0}
-              onBack={() => setStep(paymentOrigin)}
-              onPaid={() => getUserStatus().then(setUserStatus).catch(() => {})}
-            />
-          )}
+              {step === STEPS.PAYMENT && (
+                <PaymentScreen
+                  t={t}
+                  orderId={orderId}
+                  hasProductCopy={hasProductCopy}
+                  discountPercent={userStatus?.referralDiscountPercent || 0}
+                  onBack={() => setStep(paymentOrigin)}
+                  onPaid={() => getUserStatus().then(setUserStatus).catch(() => {})}
+                />
+              )}
 
-          {step === STEPS.HISTORY && (
-            <HistoryScreen
-              t={t}
-              onBack={() => setStep(STEPS.UPLOAD)}
-              onSelectOrder={(id, orderHasProductCopy) => {
-                setOrderId(id);
-                setHasProductCopy(orderHasProductCopy);
-                setProductCopy(null); // полный текст карточки для истории не подгружаем — на экране оплаты он не нужен
-                setPaymentOrigin(STEPS.HISTORY);
-                setStep(STEPS.PAYMENT);
-              }}
-            />
-          )}
+              {step === STEPS.HISTORY && (
+                <HistoryScreen
+                  t={t}
+                  onBack={() => setStep(STEPS.UPLOAD)}
+                  onSelectOrder={(id, orderHasProductCopy) => {
+                    setOrderId(id);
+                    setHasProductCopy(orderHasProductCopy);
+                    setProductCopy(null); // полный текст карточки для истории не подгружаем — на экране оплаты он не нужен
+                    setPaymentOrigin(STEPS.HISTORY);
+                    setStep(STEPS.PAYMENT);
+                  }}
+                />
+              )}
 
-          {step === STEPS.TERMS && <TermsScreen t={t} onBack={() => setStep(STEPS.UPLOAD)} />}
+              {step === STEPS.TERMS && <TermsScreen t={t} onBack={() => setStep(STEPS.UPLOAD)} />}
+            </>
+          )}
         </main>
 
-        {step === STEPS.UPLOAD && (
+        {termsAccepted && step === STEPS.UPLOAD && (
           <footer className="flex items-center justify-center px-4 pb-6 text-xs text-tg-hint">
             <button onClick={() => setStep(STEPS.TERMS)} className="underline underline-offset-2 hover:text-tg-text">
               {t.footerTermsLink}
