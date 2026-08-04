@@ -113,13 +113,13 @@ bot.start(async (ctx) => {
     Markup.button.webApp('🚀 Открыть приложение', WEBAPP_URL),
   ]);
 
-  // Иконка приложения уже лежит во фронтенде (frontend/public/icon.png) —
+  // Иконка приложения уже лежит во фронтенде (frontend/public/icon-v2.png) —
   // отдельно копировать файл в bot/ не нужно, просто берём его по публичному
   // URL самого задеплоенного фронтенда. Если по какой-то причине картинка
   // недоступна (например WEBAPP_URL временно не отвечает) — не молчим, а
   // откатываемся на обычное текстовое сообщение, чтобы /start не сломался.
   try {
-    await ctx.replyWithPhoto(`${WEBAPP_URL}/icon.png`, {
+    await ctx.replyWithPhoto(`${WEBAPP_URL}/icon-v2.png`, {
       caption,
       ...keyboard,
     });
