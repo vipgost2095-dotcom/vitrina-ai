@@ -46,7 +46,7 @@ export const STRINGS = {
     referralLinkCopied: 'Ссылка скопирована',
 
     freeGenerationsRemaining: (n, limit) => `Бесплатных генераций осталось: ${n} из ${limit}`,
-    freeGenerationsLimitReached: 'Бесплатные генерации закончились. Оплатите один из предыдущих заказов, чтобы получить ещё.',
+    freeGenerationsLimitReached: 'Бесплатный лимит генераций исчерпан навсегда. Новые карточки создать нельзя, но можно оплатить и скачать без водяного знака любую из уже сделанных ранее — см. «История». Приглашайте друзей, чтобы получить скидку до 10% на оплату.',
 
     submitLoading: 'Генерируем карточки…',
     submitIdle: 'Создать карточки',
@@ -92,6 +92,7 @@ export const STRINGS = {
 
     footerHistoryLink: 'История',
     footerTermsLink: 'Условия использования',
+    footerSupportLink: 'Поддержка',
 
     historyTitle: 'История генераций',
     historySubtitle: 'Здесь все ваши карточки — можно вернуться и оплатить любую из неоплаченных',
@@ -117,7 +118,7 @@ export const STRINGS = {
       '6. Изменения условий\n' +
       'Условия могут обновляться — актуальная версия всегда доступна в приложении.\n\n' +
       '7. Контакты\n' +
-      'По вопросам обращайтесь через бота.',
+      'По вопросам обращайтесь в поддержку: @WorldOfNamesSupport.',
 
     consentTitle: 'Прежде чем начать',
     consentSubtitle: 'Пожалуйста, ознакомьтесь с условиями использования сервиса',
@@ -169,7 +170,7 @@ export const STRINGS = {
     referralLinkCopied: 'Link copied',
 
     freeGenerationsRemaining: (n, limit) => `Free generations left: ${n} of ${limit}`,
-    freeGenerationsLimitReached: 'Free generations are used up. Pay for one of your previous orders to get more.',
+    freeGenerationsLimitReached: 'Your free generation limit is used up for good. You can no longer create new cards, but you can still pay to download any of your previous ones without a watermark — see History. Invite friends to get up to 10% off.',
 
     submitLoading: 'Generating cards…',
     submitIdle: 'Create cards',
@@ -215,6 +216,7 @@ export const STRINGS = {
 
     footerHistoryLink: 'History',
     footerTermsLink: 'Terms of use',
+    footerSupportLink: 'Support',
 
     historyTitle: 'Generation history',
     historySubtitle: 'All your cards are here — you can come back and pay for any unpaid one',
@@ -240,7 +242,7 @@ export const STRINGS = {
       '6. Changes to these terms\n' +
       'Terms may be updated — the current version is always available in the app.\n\n' +
       '7. Contact\n' +
-      'For questions, contact us through the bot.',
+      'For questions, contact support: @WorldOfNamesSupport.',
 
     consentTitle: 'Before you start',
     consentSubtitle: 'Please review the terms of use for this service',

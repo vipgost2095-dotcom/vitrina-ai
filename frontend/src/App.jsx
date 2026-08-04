@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { initTelegram } from './telegram.js';
+import { initTelegram, openTelegramLink } from './telegram.js';
 import { getStrings } from './i18n.js';
 import { getUserStatus } from './api.js';
 import WalletConnect from './components/WalletConnect.jsx';
@@ -23,6 +23,7 @@ const STEPS = {
   TERMS: 'terms',
 };
 const MAIN_STEP_ORDER = [STEPS.UPLOAD, STEPS.PREVIEW, STEPS.PAYMENT];
+const SUPPORT_URL = 'https://t.me/WorldOfNamesSupport';
 
 function getInitialLang() {
   try {
@@ -196,9 +197,13 @@ export default function App() {
         </main>
 
         {termsAccepted && step === STEPS.UPLOAD && (
-          <footer className="flex items-center justify-center px-4 pb-6 text-xs text-tg-hint">
+          <footer className="flex items-center justify-center gap-4 px-4 pb-6 text-xs text-tg-hint">
             <button onClick={() => setStep(STEPS.TERMS)} className="underline underline-offset-2 hover:text-tg-text">
               {t.footerTermsLink}
+            </button>
+            <span className="opacity-30">•</span>
+            <button onClick={() => openTelegramLink(SUPPORT_URL)} className="underline underline-offset-2 hover:text-tg-text">
+              {t.footerSupportLink}
             </button>
           </footer>
         )}

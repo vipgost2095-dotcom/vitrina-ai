@@ -29,3 +29,15 @@ export function hapticSuccess() {
 export function hapticError() {
   getTelegramWebApp()?.HapticFeedback?.notificationOccurred('error');
 }
+
+// Открывает t.me-ссылку (например, чат поддержки) — внутри Telegram через
+// нативный метод openTelegramLink, а в обычном браузере (например, при
+// локальной разработке) — просто в новой вкладке.
+export function openTelegramLink(url) {
+  const tg = getTelegramWebApp();
+  if (tg?.openTelegramLink) {
+    tg.openTelegramLink(url);
+  } else {
+    window.open(url, '_blank');
+  }
+}
