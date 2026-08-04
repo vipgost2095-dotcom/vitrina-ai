@@ -22,34 +22,33 @@ import sharp from 'sharp';
 import fetch from 'node-fetch';
 import path from 'node:path';
 import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
 
 const GENERATED_DIR = process.env.GENERATED_DIR || './generated';
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
 
-// Шрифт для водяного знака — встраиваем ПРЯМО в SVG как base64 (@font-face
-// с data-URI), а не полагаемся на системные шрифты контейнера. Это принципиально:
-// в логах Railway однажды встречалась ошибка "Fontconfig error: Cannot load
-// default config file" — если в контейнере не настроены/не установлены
-// шрифты, librsvg (через который sharp рендерит SVG) может ТИХО, без единой
-// ошибки в консоли, отрисовать пустоту вместо текста — сама операция при
-// этом "успешно" завершается, просто на выходе невидимый водяной знак. Это
-// объясняет, почему у пользователя карточки генерировались без единой
-// ошибки, а водяного знака на них не было. Шрифт (Bricolage Grotesque Bold,
-// лицензия SIL OFL, см. assets/FONT-LICENSE.txt) читается один раз при
-// старте процесса и кодируется в base64 — дальше рендер водяного знака
-// вообще не обращается к системным шрифтам.
-const WATERMARK_FONT_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets', 'watermark-font.ttf');
-let WATERMARK_FONT_BASE64 = null;
-try {
-  WATERMARK_FONT_BASE64 = fs.readFileSync(WATERMARK_FONT_PATH).toString('base64');
-} catch (err) {
-  console.warn(
-    'Не удалось загрузить встроенный шрифт водяного знака (' + WATERMARK_FONT_PATH + ') — ' +
-      'водяной знак откатится на системный шрифт, который в контейнере может отсутствовать:',
-    err.message
-  );
-}
+// Водяной знак — ГОТОВЫЕ ВЕКТОРНЫЕ КОНТУРЫ слова "PREVIEW", а не текст.
+//
+// История вопроса (важно, чтобы не наступить на те же грабли повторно):
+// 1) Сначала водяной знак рисовался обычным SVG <text> с font-family: sans-serif —
+//    полагались на системные шрифты контейнера. В логах Railway встречалась
+//    "Fontconfig error: Cannot load default config file" — из-за неё librsvg
+//    (через который sharp рендерит SVG) молча рисовал ПУСТОТУ вместо текста,
+//    без единой ошибки — операция "успешно" завершалась с невидимым знаком.
+// 2) Тогда попробовали вшить шрифт прямо в SVG через @font-face с base64 —
+//    в теории должно было исключить зависимость от системных шрифтов вообще.
+//    На практике НЕ ПОМОГЛО: судя по всему, версия librsvg на Railway либо не
+//    поддерживает @font-face вообще, либо поддерживает не полностью, и всё
+//    равно скатывается на системный (сломанный) шрифт.
+// 3) Единственный способ, который гарантированно работает в ЛЮБОМ окружении —
+//    вообще не просить рендерер искать шрифт. Контуры букв слова "PREVIEW"
+//    извлечены ЗАРАНЕЕ (offline, через fontTools) из шрифта Bricolage
+//    Grotesque Bold (лицензия SIL OFL, см. assets/FONT-LICENSE.txt) и зашиты
+//    ниже как готовые SVG <path>. Во время генерации карточки рендерер просто
+//    закрашивает фигуры — ему физически не от кого зависеть, шрифты вообще
+//    не участвуют в процессе.
+const WATERMARK_GLYPH_UNITS_PER_EM = 1000;
+const WATERMARK_TEXT_ADVANCE_WIDTH = 4519; // ширина слова "PREVIEW" в тех же единицах, что и контуры
+const WATERMARK_GLYPH_PATHS = `<g transform="translate(0,0)"><path d="M174 186V299H325Q397 299 433.0 328.5Q469 358 469 426Q469 486 435.5 517.5Q402 549 332 549H174V660H336Q400 660 451.5 645.0Q503 630 539.5 600.5Q576 571 595.0 526.5Q614 482 614 422Q614 345 579.0 292.5Q544 240 475.5 213.0Q407 186 305 186ZM73 0V660H217V0Z"/></g><g transform="translate(646,0)"><path d="M73 0V660H341Q395 660 439.0 651.5Q483 643 517.0 627.0Q551 611 574.5 587.5Q598 564 610.0 533.5Q622 503 622 466Q622 431 611.0 402.5Q600 374 578.0 353.0Q556 332 523.0 318.5Q490 305 446 300V285Q497 280 527.5 261.5Q558 243 575.5 212.0Q593 181 606 135L646 0H487L456 125Q447 165 430.0 187.5Q413 210 387.0 219.5Q361 229 324 229H217V0ZM217 337H331Q399 337 436.0 363.0Q473 389 473 444Q473 498 438.5 523.5Q404 549 335 549H217Z"/></g><g transform="translate(1325,0)"><path d="M73 0V660H218V0ZM173 0V117H582V0ZM173 280V387H532V280ZM173 544V660H580V544Z"/></g><g transform="translate(1946,0)"><path d="M236 0 18 660H175L331 122H344L501 660H656L437 0Z"/></g><g transform="translate(2619,0)"><path d="M73 0V660H220V0Z"/></g><g transform="translate(2912,0)"><path d="M73 0V660H218V0ZM173 0V117H582V0ZM173 280V387H532V280ZM173 544V660H580V544Z"/></g><g transform="translate(3533,0)"><path d="M172 0 23 660H180L278 123H289L405 660H588L704 123H716L814 660H963L812 0H611L499 537H490L378 0Z"/></g>`;
 
 const MIN_SIZE = 200;
 const MAX_SIZE = 2048;
@@ -570,10 +569,6 @@ export async function applyWatermarkToVariants(variants, orderId) {
 
     const watermarkSvg = Buffer.from(`
       <svg width="${variant.width}" height="${variant.height}" xmlns="http://www.w3.org/2000/svg">
-        <style>
-          ${WATERMARK_FONT_BASE64 ? `@font-face { font-family: 'WatermarkFont'; font-weight: 700; src: url(data:font/truetype;base64,${WATERMARK_FONT_BASE64}) format('truetype'); }` : ''}
-          .wm { fill: rgba(255,0,0,0.6); font-size: ${fontSize}px; font-family: ${WATERMARK_FONT_BASE64 ? "'WatermarkFont', " : ''}sans-serif; font-weight: 700; }
-        </style>
         ${buildWatermarkTiles(variant.width, variant.height, fontSize)}
       </svg>
     `);
@@ -589,17 +584,24 @@ export async function applyWatermarkToVariants(variants, orderId) {
 }
 
 // Плотная сетка перекрывающихся повторов — шаг сетки МЕНЬШЕ размера самой
-// буквы (0.55×/0.85× вместо прежних 2.2×/3.0×), из-за этого соседние повторы
-// слова "PREVIEW" накладываются друг на друга и закрывают собой пустоты
-// внутри самих букв — именно это (а не увеличение размера буквы саму по
-// себе) реально не оставляет на карточке чистого участка для скриншота.
+// буквы (0.55×/0.85× от fontSize), из-за этого соседние повторы слова
+// "PREVIEW" накладываются друг на друга и закрывают собой пустоты внутри
+// самих букв — именно это (а не голый размер буквы) реально не оставляет на
+// карточке чистого участка для скриншота. Каждая плитка — это <g> с
+// transform (сдвиг + поворот -30° + масштаб под fontSize), вокруг ОДНИХ И
+// ТЕХ ЖЕ готовых контуров WATERMARK_GLYPH_PATHS — сам SVG не содержит ни
+// одного текстового узла, поэтому рендереру буквально не от кого зависеть.
 function buildWatermarkTiles(width, height, fontSize) {
   const yStep = Math.round(fontSize * 0.55);
   const xStep = Math.round(fontSize * 0.85);
+  // scale переводит координаты контуров (в единицах шрифта, unitsPerEm=1000)
+  // в пиксели нужного размера; знак "минус" по Y — потому что в контурах
+  // шрифта "вверх" это положительный Y, а в SVG "вниз" это положительный Y.
+  const scale = fontSize / WATERMARK_GLYPH_UNITS_PER_EM;
   let tiles = '';
   for (let y = fontSize; y < height + fontSize; y += yStep) {
     for (let x = -fontSize; x < width + fontSize; x += xStep) {
-      tiles += `<text class="wm" x="${x}" y="${y}" transform="rotate(-30 ${x} ${y})">PREVIEW</text>`;
+      tiles += `<g transform="translate(${x},${y}) rotate(-30) scale(${scale},${-scale})" fill="rgba(255,0,0,0.6)">${WATERMARK_GLYPH_PATHS}</g>`;
     }
   }
   return tiles;
