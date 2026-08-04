@@ -14,7 +14,7 @@ function authHeaders() {
 // (сама генерация занимает время, особенно с несколькими вызовами ИИ).
 export async function startUpload(file, description, width, height) {
   const formData = new FormData();
-  formData.append('photo', file);
+  if (file) formData.append('photo', file);
   if (description) formData.append('description', description);
   if (width) formData.append('width', width);
   if (height) formData.append('height', height);
