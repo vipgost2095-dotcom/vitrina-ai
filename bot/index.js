@@ -1,6 +1,7 @@
 // index.js — простой бот на Telegraf.
-// Его единственная задача — приветствовать пользователя и открывать Mini App.
-// Вся бизнес-логика (загрузка фото, оплата) живёт во фронтенде + бэкенде.
+// Приветствует пользователя, открывает Mini App, обрабатывает оплату Stars,
+// и обрабатывает реферальные ссылки (t.me/<bot>?start=ref_<telegram_id>).
+// Вся остальная бизнес-логика (загрузка фото, оплата, скидки) живёт в бэкенде.
 
 import 'dotenv/config';
 import { Telegraf, Markup } from 'telegraf';
@@ -20,12 +21,14 @@ if (!WEBAPP_URL) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
+// Узнаём собственный username один раз при старте — нужен для построения
+// реферальных ссылок вида t.me/<username>?start=ref_<telegram_id>.
+let botUsername = null;
+
 // Telegram обязательно требует ответить на pre_checkout_query в течение 10 секунд,
 // иначе платёж будет автоматически отменён у пользователя.
 bot.on('pre_checkout_query', async (ctx) => {
   try {
-    // Здесь можно добавить свою проверку (например, что заказ ещё существует
-    // и не был оплачен ранее) — payload это наш orderId.
     await ctx.answerPreCheckoutQuery(true);
   } catch (err) {
     console.error('Ошибка pre_checkout_query:', err);
@@ -69,13 +72,42 @@ bot.on('message', async (ctx, next) => {
 });
 
 bot.start(async (ctx) => {
+  const telegramId = String(ctx.from.id);
+  const username = ctx.from.username || null;
+
+  // ctx.startPayload — это то, что идёт после "/start " (Telegraf разбирает
+  // сам). Реферальная ссылка выглядит как t.me/<bot>?start=ref_<telegram_id>.
+  const payload = ctx.startPayload || '';
+  const referredBy = payload.startsWith('ref_') ? payload.slice(4) : null;
+
+  if (BACKEND_URL && INTERNAL_API_SECRET) {
+    try {
+      await fetch(`${BACKEND_URL}/api/internal/register-referral`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Internal-Secret': INTERNAL_API_SECRET,
+        },
+        body: JSON.stringify({ telegramId, username, referredBy }),
+      });
+    } catch (err) {
+      console.error('Не удалось зарегистрировать реферала:', err);
+    }
+  }
+
+  const referralLink = botUsername ? `https://t.me/${botUsername}?start=ref_${telegramId}` : null;
+
   await ctx.reply(
-    '👋 Привет! Это бот для генерации красивых карточек товаров.\n\n' +
+    '👋 Привет! Это бот для генерации красивых карточек товаров с помощью ИИ.\n\n' +
       '1. Открой приложение кнопкой ниже\n' +
-      '2. Загрузи фото товара — получишь карточки под Wildberries, Ozon, Яндекс Маркет и универсальную\n' +
-      '3. Оплати любым удобным способом: TON, USDT или Telegram Stars\n' +
+      '2. Загрузи фото товара, при желании опиши стиль/фон и укажи размер\n' +
+      '3. Получишь 3 карточки в разных стилях — первые несколько генераций бесплатно\n' +
+      '4. Оплати любым удобным способом: TON, USDT или Telegram Stars\n' +
       '   (кошелёк нужен только для оплаты TON/USDT — для Stars не требуется)\n' +
-      '4. Получи все карточки без водяного знака прямо здесь, в чате',
+      '5. Получи все карточки без водяного знака прямо здесь, в чате' +
+      (referralLink
+        ? '\n\n💸 Приглашай друзей и получай скидку до 10% на свои покупки:\n' + referralLink
+        : ''),
     Markup.inlineKeyboard([
       Markup.button.webApp('🚀 Открыть приложение', WEBAPP_URL),
     ])
@@ -86,8 +118,15 @@ bot.help((ctx) =>
   ctx.reply('Просто нажми /start и открой приложение через кнопку.')
 );
 
-bot.launch().then(() => {
+bot.launch().then(async () => {
   console.log('Бот запущен (long polling)');
+  try {
+    const me = await bot.telegram.getMe();
+    botUsername = me.username;
+    console.log(`Юзернейм бота: @${botUsername}`);
+  } catch (err) {
+    console.error('Не удалось получить username бота (реферальные ссылки не будут показываться):', err);
+  }
 });
 
 // Аккуратное завершение процесса
