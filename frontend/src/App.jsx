@@ -142,6 +142,7 @@ export default function App() {
                   <ReferralBlock t={t} discountPercent={userStatus?.referralDiscountPercent} />
                   <UploadForm
                     t={t}
+                    lang={lang}
                     status={userStatus}
                     onStatusChange={() => getUserStatus().then(setUserStatus).catch(() => {})}
                     onUploaded={(id, urls, uploadedStyles, uploadedLabels, uploadedCopy) => {
