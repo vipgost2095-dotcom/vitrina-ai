@@ -70,6 +70,15 @@ const orderMigrations = [
   // вызывается при КАЖДОМ опросе, и без этого флага для уже оплаченного заказа
   // эти действия выполнялись бы повторно на каждый опрос, а не один раз.
   ['lifecycle_processed', "ALTER TABLE orders ADD COLUMN lifecycle_processed INTEGER DEFAULT 0"],
+  // generate_after_payment — этот заказ создан ПОСЛЕ исчерпания бесплатного
+  // лимита: сначала оплата, и только потом (см. orderLifecycle.js) реально
+  // запускается генерация карточек — а не наоборот, как для обычных
+  // (бесплатных) заказов. pending_* хранят то, что нужно для генерации,
+  // пока пользователь ещё не заплатил.
+  ['generate_after_payment', "ALTER TABLE orders ADD COLUMN generate_after_payment INTEGER DEFAULT 0"],
+  ['pending_description', "ALTER TABLE orders ADD COLUMN pending_description TEXT"],
+  ['pending_width', "ALTER TABLE orders ADD COLUMN pending_width INTEGER"],
+  ['pending_height', "ALTER TABLE orders ADD COLUMN pending_height INTEGER"],
 ];
 for (const [column, sql] of orderMigrations) {
   if (!existingOrderColumns.has(column)) db.exec(sql);
@@ -144,7 +153,7 @@ export function getOrdersByUser(telegramId, limit = 20) {
     SELECT id, status, payment_method, amount_ton, usdt_amount, stars_amount,
            discount_percent, watermarked_paths_json, product_copy_json, created_at
     FROM orders
-    WHERE telegram_id = ? AND status IN ('generated', 'awaiting_payment', 'paid')
+    WHERE telegram_id = ? AND status IN ('created', 'generated', 'awaiting_payment', 'paid')
     ORDER BY created_at DESC
     LIMIT ?
   `).all(String(telegramId), limit);
