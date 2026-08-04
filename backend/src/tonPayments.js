@@ -43,11 +43,12 @@ export function createPaymentRequest(orderId, discountPercent = 0) {
   const amountTon = applyDiscount(AMOUNT_TON, discountPercent);
 
   return {
-    // TonConnect ожидает адрес в raw-формате (workchain:hex) в поле
-    // messages[].address — переводим из user-friendly формата на всякий
-    // случай, чтобы не зависеть от того, насколько лояльно конкретный
-    // кошелёк относится к формату адреса.
-    receiverAddress: Address.parse(RECEIVER).toRawString(),
+    // Раньше здесь был перевод в raw-формат (workchain:hex) по документации
+    // TonConnect — но на практике реальный кошелёк отклонил такую транзакцию
+    // с ошибкой "Wrong 'address' format" (проверено на реальном платеже).
+    // Возвращаем как есть — обычный user-friendly формат (UQ.../EQ...) из .env,
+    // именно его реально ждёт клиентская валидация TonConnect SDK.
+    receiverAddress: RECEIVER,
     amountTon,
     amountNano: Math.round(amountTon * 1e9).toString(),
     comment: orderId, // будет закодирован во frontend через beginCell().storeUint(0,32).storeStringTail(comment)
@@ -134,7 +135,9 @@ export async function getJettonWalletAddress(ownerAddress) {
   const resultCell = Cell.fromBoc(Buffer.from(cellBytesB64, 'base64'))[0];
   const jettonWalletAddress = resultCell.beginParse().loadAddress();
 
-  return jettonWalletAddress.toRawString();
+  // Тот же откат, что и для основного адреса выше: TonConnect SDK на практике
+  // ждёт user-friendly формат, а не raw workchain:hex.
+  return jettonWalletAddress.toString({ bounceable: true });
 }
 
 /**
