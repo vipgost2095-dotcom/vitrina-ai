@@ -10,7 +10,9 @@ function authHeaders() {
   return { 'X-Telegram-Init-Data': getInitData() };
 }
 
-export async function uploadPhoto(file, description, width, height) {
+// Запускает генерацию — бэкенд сразу отвечает orderId, не дожидаясь готовности
+// (сама генерация занимает время, особенно с несколькими вызовами ИИ).
+export async function startUpload(file, description, width, height) {
   const formData = new FormData();
   formData.append('photo', file);
   if (description) formData.append('description', description);
@@ -27,7 +29,20 @@ export async function uploadPhoto(file, description, width, height) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || 'Не удалось загрузить фото');
   }
-  return res.json(); // { orderId, previewUrls, styles, labels }
+  return res.json(); // { orderId }
+}
+
+// Опрашивается после startUpload — возвращает честный процент готовности
+// (progressPercent), а когда status === 'generated' — сразу все данные для превью.
+export async function getGenerationStatus(orderId) {
+  const res = await fetch(`${BASE_URL}/api/upload/status/${orderId}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Не удалось проверить статус генерации');
+  }
+  return res.json(); // { status, progressPercent, step?, previewUrls?, styles?, labels?, productCopy? }
 }
 
 // previewUrls, которые вернул /api/upload, уже полные относительные пути —

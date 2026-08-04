@@ -51,6 +51,17 @@ export const STRINGS = {
     submitLoading: 'Генерируем карточки…',
     submitIdle: 'Создать карточки',
 
+    progressStepQueued: 'Готовим фото…',
+    progressStepCutout: 'Вырезаем товар с фона…',
+    progressStepPrepare: 'Готовим фото…',
+    progressStepVariant1: 'Рисуем вариант 1 из 3…',
+    progressStepVariant2: 'Рисуем вариант 2 из 3…',
+    progressStepVariant3: 'Рисуем вариант 3 из 3…',
+    progressStepWatermarking: 'Готовим превью…',
+    progressStepCopywriting: 'Пишем текст карточки…',
+    progressStepDone: 'Готово!',
+    progressGenericError: 'Не удалось сгенерировать карточки. Попробуйте ещё раз.',
+
     previewBack: '← Назад',
     previewTitle: 'Карточки готовы',
     previewSubtitle: 'Превью с водяным знаком. Чтобы скачать без него — оплатите доступ.',
@@ -128,6 +139,17 @@ export const STRINGS = {
 
     submitLoading: 'Generating cards…',
     submitIdle: 'Create cards',
+
+    progressStepQueued: 'Preparing photo…',
+    progressStepCutout: 'Removing background…',
+    progressStepPrepare: 'Preparing photo…',
+    progressStepVariant1: 'Drawing variant 1 of 3…',
+    progressStepVariant2: 'Drawing variant 2 of 3…',
+    progressStepVariant3: 'Drawing variant 3 of 3…',
+    progressStepWatermarking: 'Preparing preview…',
+    progressStepCopywriting: 'Writing card text…',
+    progressStepDone: 'Done!',
+    progressGenericError: 'Could not generate cards. Please try again.',
 
     previewBack: '← Back',
     previewTitle: 'Cards are ready',

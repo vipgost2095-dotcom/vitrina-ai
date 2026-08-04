@@ -98,7 +98,7 @@ export default function App() {
               <UploadForm
                 t={t}
                 status={userStatus}
-                onStatusChange={(partial) => setUserStatus((prev) => ({ ...prev, ...partial }))}
+                onStatusChange={() => getUserStatus().then(setUserStatus).catch(() => {})}
                 onUploaded={(id, urls, uploadedStyles, uploadedLabels, uploadedCopy) => {
                   setOrderId(id);
                   setPreviewUrls(urls);
