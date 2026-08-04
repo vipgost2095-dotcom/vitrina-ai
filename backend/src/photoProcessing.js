@@ -70,8 +70,18 @@ const DEFAULT_BACKGROUND_PROMPT =
 // Технические требования — не про стиль фона, поэтому не спорят с описанием
 // пользователя, добавляются всегда. Отдельно просим прямой ровный ракурс без
 // наклона, чтобы товар не выглядел "перекошенным" на карточке.
+// Запрет на текст — применяется ТОЛЬКО когда пользователь сам ничего не
+// описал (наш собственный запасной фон по умолчанию). Если пользователь
+// что-то написал сам — в том числе прямо попросил текст/надпись/элемент на
+// карточке — этот запрет ему только мешал бы, поэтому в таком случае вообще
+// не добавляется, и модель свободна рисовать то, что описано.
+const NO_TEXT_INSTRUCTION =
+  'IMPORTANT: absolutely no text, letters, words, titles, labels, numbers or writing of any kind ' +
+  'anywhere in the image — not on the background, not as an overlay, not stylized, not decorative. ' +
+  'The image must be completely free of any lettering.';
+
 const QUALITY_SUFFIX =
-  'Photorealistic, no added text, no watermarks, no logos. ' +
+  'Photorealistic, no watermarks, no logos. ' +
   'Photograph the product straight-on and level, centered in the frame, ' +
   'not tilted or rotated, no dramatic diagonal angles.';
 
@@ -201,14 +211,19 @@ function buildPrompt(userDescription, envOverrideVarName, styleHint, { requirePr
   const integrityPart = requireProductIntegrity ? ` ${PRODUCT_INTEGRITY_INSTRUCTION}` : '';
   const envOverride = process.env[envOverrideVarName];
 
-  let corePrompt;
   if (description) {
-    corePrompt = `${description}, ${styleHint || DEFAULT_BACKGROUND_PROMPT}`;
-  } else {
-    corePrompt = `${envOverride ? envOverride + ', ' : ''}${styleHint || DEFAULT_BACKGROUND_PROMPT}`;
+    // Пользователь сам что-то написал — не мешаем запретом на текст: если
+    // он попросил надпись/элемент на карточке, пусть модель попробует это
+    // нарисовать. Единственное, что всё равно может добавиться —
+    // integrityPart (защита самого товара в режиме openai_full).
+    const corePrompt = `${description}, ${styleHint || DEFAULT_BACKGROUND_PROMPT}`;
+    return `${corePrompt}. ${QUALITY_SUFFIX}${integrityPart}`;
   }
 
-  return `${corePrompt}. ${QUALITY_SUFFIX}${integrityPart}`;
+  // Пользователь ничего не написал — это уже наш собственный запасной фон,
+  // тут ограничивать нечего, и текст на нём точно не нужен.
+  const corePrompt = `${envOverride ? envOverride + ', ' : ''}${styleHint || DEFAULT_BACKGROUND_PROMPT}`;
+  return `${NO_TEXT_INSTRUCTION} ${corePrompt}. ${QUALITY_SUFFIX}${integrityPart}`;
 }
 
 // gpt-image-2 (текущий флагман на момент написания, август 2026) умеет
@@ -406,12 +421,19 @@ async function renderCardWithGradientStub(productBuffer, style, width, height, o
 export async function applyWatermarkToVariants(variants, orderId) {
   const results = [];
   for (const variant of variants) {
+    // Размер шрифта — ДОЛЯ от размера карточки (не фиксированные пиксели):
+    // пользователь теперь сам задаёт размер (200-2048px), и фиксированное
+    // число либо тонуло на маленьких карточках, либо было бы гигантским на
+    // больших. 25% от меньшей стороны — это увеличенный (втрое против
+    // самой первой версии) и хорошо заметный на любом размере знак.
+    const fontSize = Math.max(28, Math.round(Math.min(variant.width, variant.height) * 0.25));
+
     const watermarkSvg = Buffer.from(`
       <svg width="${variant.width}" height="${variant.height}" xmlns="http://www.w3.org/2000/svg">
         <style>
-          .wm { fill: rgba(255,255,255,0.55); font-size: 84px; font-family: sans-serif; font-weight: 700; }
+          .wm { fill: rgba(255,255,255,0.55); font-size: ${fontSize}px; font-family: sans-serif; font-weight: 700; }
         </style>
-        ${buildWatermarkTiles(variant.width, variant.height)}
+        ${buildWatermarkTiles(variant.width, variant.height, fontSize)}
       </svg>
     `);
 
@@ -425,12 +447,15 @@ export async function applyWatermarkToVariants(variants, orderId) {
   return results;
 }
 
-// Генерирует несколько повторов надписи по диагонали карточки — шрифт и шаг
-// увеличены вдвое по сравнению с прошлой версией (было 42px/200/300).
-function buildWatermarkTiles(width, height) {
+// Генерирует несколько повторов надписи по диагонали карточки — шаг сетки
+// считается от fontSize, чтобы плитка оставалась пропорциональной на любом
+// размере карточки (пользователь теперь задаёт размер сам).
+function buildWatermarkTiles(width, height, fontSize) {
+  const yStep = Math.round(fontSize * 2.2);
+  const xStep = Math.round(fontSize * 3.0);
   let tiles = '';
-  for (let y = 160; y < height; y += 340) {
-    for (let x = -150; x < width; x += 460) {
+  for (let y = fontSize; y < height + fontSize; y += yStep) {
+    for (let x = -fontSize; x < width + fontSize; x += xStep) {
       tiles += `<text class="wm" x="${x}" y="${y}" transform="rotate(-30 ${x} ${y})">PREVIEW</text>`;
     }
   }
