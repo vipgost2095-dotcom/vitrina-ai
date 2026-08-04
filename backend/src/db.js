@@ -77,8 +77,11 @@ for (const [column, sql] of orderMigrations) {
 
 const existingUserColumns = new Set(db.prepare('PRAGMA table_info(users)').all().map((c) => c.name));
 const userMigrations = [
-  // free_generations_used — счётчик бесплатных генераций с момента последней
-  // оплаты (или с регистрации). Сбрасывается в 0 при каждой успешной оплате.
+  // free_generations_used — счётчик БЕСПЛАТНЫХ генераций пользователя за всё
+  // время. Это ПОЖИЗНЕННЫЙ лимит (см. FREE_GENERATIONS_LIMIT в routes/user.js) —
+  // оплата НЕ сбрасывает этот счётчик, после исчерпания лимита бесплатные
+  // генерации больше не выдаются никогда. Единственный постоянный бонус за
+  // активность — накопленная реферальная скидка на оплату (см. ниже).
   ['free_generations_used', "ALTER TABLE users ADD COLUMN free_generations_used INTEGER DEFAULT 0"],
   // referred_by — telegram_id того, кто пригласил этого пользователя (по
   // реферальной ссылке t.me/bot?start=ref_<id>). Ставится один раз, при первом
@@ -116,10 +119,6 @@ export function setReferredBy(telegramId, referrerId) {
 export function incrementFreeGenerations(telegramId) {
   db.prepare(`UPDATE users SET free_generations_used = free_generations_used + 1 WHERE telegram_id = ?`)
     .run(String(telegramId));
-}
-
-export function resetFreeGenerations(telegramId) {
-  db.prepare(`UPDATE users SET free_generations_used = 0 WHERE telegram_id = ?`).run(String(telegramId));
 }
 
 // Увеличивает накопленную реферальную скидку, не превышая maxPercent
