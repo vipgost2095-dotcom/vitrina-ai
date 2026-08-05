@@ -558,7 +558,7 @@ export async function applyWatermarkToVariants(variants, orderId) {
     // превью именно в том, чтобы показать, ЧТО покупаешь. Возвращаю к
     // разумному балансу: знак крупный и заметный (не пропустишь, не
     // вырежешь чистый кусок для скриншота), но сам товар остаётся видимым.
-    const fontSize = Math.max(28, Math.round(Math.min(variant.width, variant.height) * 0.35));
+    const fontSize = Math.max(28, Math.round(Math.min(variant.width, variant.height) * 0.28));
 
     const watermarkSvg = Buffer.from(`
       <svg width="${variant.width}" height="${variant.height}" xmlns="http://www.w3.org/2000/svg">
@@ -592,10 +592,16 @@ function buildWatermarkTiles(width, height, fontSize) {
   // шрифта "вверх" это положительный Y, а в SVG "вниз" это положительный Y.
   const scale = fontSize / WATERMARK_GLYPH_UNITS_PER_EM;
   let tiles = '';
+  let rowIndex = 0;
   for (let y = fontSize; y < height + fontSize; y += yStep) {
-    for (let x = -fontSize; x < width + fontSize; x += xStep) {
+    // Шахматное смещение через ряд (кирпичная кладка) — без него все строки
+    // начинаются в одном и том же x, и из-за поворота -30° это выглядело
+    // полосами/сгустками, а не равномерной сеткой.
+    const rowOffset = rowIndex % 2 === 0 ? 0 : Math.round(xStep / 2);
+    for (let x = -fontSize - rowOffset; x < width + fontSize; x += xStep) {
       tiles += `<g transform="translate(${x},${y}) rotate(-30) scale(${scale},${-scale})" fill="rgba(255,0,0,0.6)">${WATERMARK_GLYPH_PATHS}</g>`;
     }
+    rowIndex++;
   }
   return tiles;
 }
